@@ -1,0 +1,17 @@
+/target/
+/runs/
+/tasks/
+/docs/
+/data/
+/calibration/
+/game-data/
+/reference/
+/dd-archive/
+*.json
+*.jsonl
+*.darkest
+*.csv
+*.dm
+*.gz
+*.zip
+.env*

@@ -1,0 +1,12 @@
+[package]
+name = "dd-data"
+description = "Parsers for Darkest Dungeon's original data files (.darkest / .json)."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+csv = "1"
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }

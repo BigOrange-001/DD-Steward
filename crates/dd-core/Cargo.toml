@@ -1,0 +1,12 @@
+[package]
+name = "dd-core"
+description = "Rules engine: combat state, RNG, actions, player-visible observations."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+dd-data = { path = "../dd-data" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+sha2 = "0.10"
