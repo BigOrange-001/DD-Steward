@@ -247,7 +247,8 @@ impl GameData {
         let mut versions = vec![];
         for index in self.overlay.sources(path) {
             let file = self.overlay.layers[index].root.join(path);
-            let raw = std::fs::read(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+            let raw = crate::telemetry024c::read(&file)
+                .map_err(|e| format!("{}: {e}", file.display()))?;
             let v: Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
             if !versions.contains(&v) {
                 versions.push(v);

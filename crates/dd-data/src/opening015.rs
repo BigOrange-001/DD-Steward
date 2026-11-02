@@ -50,7 +50,7 @@ pub struct Candidates {
 }
 impl Candidates {
     pub fn documented() -> Result<Self> {
-        serde_json::from_str(r###"{
+        serde_json::from_str(r#"{
   "version": "opening-candidates-015-v1",
   "source": "https://darkestdungeon.wiki.gg/wiki/Light_meter; https://darkestdungeon.wiki.gg/wiki/Hunger; https://darkestdungeon.wiki.gg/wiki/Old_Road; https://darkestdungeon.wiki.gg/wiki/Retreating; community-only fullness hypothesis",
   "light_new": {
@@ -89,7 +89,8 @@ impl Candidates {
     "exploration_buffs": "distinct_pre_encounter_effects_applied_before_initiative_not_previous_battle_carry_v1",
     "abandonment_inventory": "original_keep_rates_quantity_floor_per_item_total_v1"
   }
-}"###)
+}
+"#)
             .map_err(|e| e.to_string())
     }
     pub fn validate(&self) -> Result<()> {

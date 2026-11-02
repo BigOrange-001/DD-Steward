@@ -44,8 +44,7 @@ pub fn inventory(g: &GameData) -> Result<ClosureReport> {
     let report = support::inventory(g)?;
     let quirks = g.quirks()?;
     let diseases = g.disease_catalog()?;
-    let raw_rules: serde_json::Value =
-        serde_json::from_slice(&g.overlay.read("shared/rules.json")?).map_err(|e| e.to_string())?;
+    let raw_rules = g.overlay.json("shared/rules.json")?;
     let trait_check = CombatGlobals::load_explicit(
         &raw_rules,
         &g.buffs,

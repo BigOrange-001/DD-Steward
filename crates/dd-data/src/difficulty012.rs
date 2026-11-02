@@ -40,9 +40,7 @@ impl GameData {
         if !hero.hero {
             return Err("quest difficulty requires a hero".into());
         }
-        let raw: serde_json::Value =
-            serde_json::from_slice(&self.overlay.read("shared/rules.json")?)
-                .map_err(|e| e.to_string())?;
+        let raw = self.overlay.json("shared/rules.json")?;
         let bound = |key: &str| -> Result<u32> {
             raw[key]
                 .as_f64()

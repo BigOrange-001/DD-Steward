@@ -453,6 +453,8 @@ impl Brain {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ActorMechanics {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub player_rounding023: bool,
     pub boss: crate::special::BossSpec,
     pub build: crate::build010::BuildState,
     pub disease_resist: f64,

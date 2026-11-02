@@ -320,9 +320,12 @@ impl Battle {
             let Some(spec) = self.units[captor].blueprint.mechanics.boss.full.clone() else {
                 continue;
             };
-            let amount = (f64::from(self.units[hero].stats().hp) * spec.damage)
-                .round()
-                .clamp(0., 1000000.) as i32;
+            let raw = f64::from(self.units[hero].stats().hp) * spec.damage;
+            let amount = if self.rounding023() {
+                self.damage_quant023(captor, hero, raw)
+            } else {
+                raw.round().clamp(0., 1e6) as i32
+            };
             self.damage(hero, amount, false, events);
             self.stress_change(hero, spec.stress, events);
         }
@@ -347,8 +350,12 @@ impl Battle {
             })
             .collect::<Vec<_>>();
         for (id, p) in companions {
-            let amount = (f64::from(self.units[id].stats().hp) * p).round() as i32;
-            self.heal(id, amount, events);
+            let raw = f64::from(self.units[id].stats().hp) * p;
+            if self.rounding023() && self.units[id].blueprint.hero {
+                self.heal_float023(id, raw, events);
+            } else {
+                self.heal(id, raw.round() as i32, events);
+            }
         }
         self.cleanup_captives(events);
     }

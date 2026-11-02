@@ -29,8 +29,7 @@ impl Candidates {
         }
     }
     pub fn documented() -> Result<Self> {
-        serde_json::from_str(
-            r###"{
+        serde_json::from_str(r#"{
   "version": "map-candidates-014-v1",
   "extended_generation_records": true,
   "court_task_aliases": true,
@@ -48,9 +47,9 @@ impl Candidates {
     "DD_map2",
     "DD_map3"
   ]
-}"###,
-        )
-        .map_err(|e| e.to_string())
+}
+"#)
+            .map_err(|e| e.to_string())
     }
     pub fn for_content(content: &ContentConfig) -> Result<Self> {
         let mut c = Self::documented()?;

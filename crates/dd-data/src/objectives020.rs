@@ -59,7 +59,7 @@ pub struct Catalog {
 impl Catalog {
     pub fn load(g: &GameData, campaign: &Data, town: &crate::town016::Data) -> Result<Self> {
         let policy: Policy =
-            serde_json::from_str(r###"{
+            serde_json::from_str(r#"{
   "version": "steward-objectives-020-v1",
   "training_level": 6,
   "training_rule": "User confirmed: only an actual expedition return crossing from below level six to six counts; shard_hungry mercenaries excluded; achievement remains after death or dismissal. Recruitment at six and town-only XP never count.",
@@ -119,7 +119,8 @@ impl Catalog {
     "crow_D": "color_of_madness",
     "shambler_E": "color_of_madness"
   }
-}"###)
+}
+"#)
                 .map_err(|e| e.to_string())?;
         if policy.version != PROFILE || policy.training_level != 6 {
             return Err("unknown Steward objective policy".into());
@@ -296,7 +297,7 @@ impl Catalog {
                 || p.starts_with("maps/") && (p.ends_with(".dm") || p.ends_with(".csv"))
         }) {
             for layer in g.overlay.sources(path) {
-                let bytes = std::fs::read(g.overlay.layers[layer].root.join(path))
+                let bytes = crate::telemetry024c::read(g.overlay.layers[layer].root.join(path))
                     .map_err(|e| e.to_string())?;
                 c.sources.push(Source {
                     path: path.clone(),

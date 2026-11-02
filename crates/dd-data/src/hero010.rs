@@ -237,8 +237,7 @@ pub fn parse(g: &GameData, d: &Document) -> Result<HeroRules> {
             .iter()
             .map(|(id, _)| crate::library::unique_json(&g.traits, id, "class trait").cloned())
             .collect::<Result<Vec<_>>>()?;
-        let rules = serde_json::from_slice(&g.overlay.read("shared/rules.json")?)
-            .map_err(|e| e.to_string())?;
+        let rules = g.overlay.json("shared/rules.json")?;
         h.override_defs = crate::mechanics::CombatGlobals::load_explicit(
             &rules,
             &g.buffs,

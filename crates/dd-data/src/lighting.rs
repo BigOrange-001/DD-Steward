@@ -170,9 +170,7 @@ impl Lighting {
 }
 impl GameData {
     pub fn lighting(&self, torch: u8) -> Result<Lighting> {
-        let raw: serde_json::Value =
-            serde_json::from_slice(&self.overlay.read("shared/rules.json")?)
-                .map_err(|e| e.to_string())?;
+        let raw = self.overlay.json("shared/rules.json")?;
         let table = serde_json::from_value(
             raw.get("darkness")
                 .cloned()

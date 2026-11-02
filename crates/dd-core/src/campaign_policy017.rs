@@ -3,7 +3,7 @@ use crate::opening015::{Action, Observation};
 use dd_data::{combat::Result, inventory015::Item};
 #[path = "campaign_city_policy017.rs"]
 mod city;
-pub use city::city;
+pub use city::{city, city_without_skill_selection025};
 fn progress_item(item: &Item) -> bool {
     item.kind == "quest_item"
         || (item.kind == "estate_currency" && item.id.starts_with("crimson_court_invitation_"))
@@ -547,3 +547,4 @@ pub fn choose(o: &Observation) -> Result<Action> {
     }
     crate::opening_policy015::choose(&filtered)
 }
+

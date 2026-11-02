@@ -35,7 +35,7 @@ impl Rules {
             return Err("018 requires explicit ContentConfig::with_campaign018_candidates".into());
         }
         let candidate: Value =
-            serde_json::from_str(r###"{
+            serde_json::from_str(r#"{
   "version": "campaign-candidates-018-v3",
   "semantics": {
     "fixed_hazard_index": "index_zero_only_if_one_distinct_effective_prop_type_otherwise_error",
@@ -55,7 +55,8 @@ impl Rules {
     "empty_trinket_loot_pool": "an_existing_rarity_with_no_region_class_or_uniqueness_eligible_items_produces_no_award_no_reroll_or_cross_region_substitution_unknown_rarity_or_conflicting_data_still_error_only_018_native_loot",
     "native_trinket_ownership": "actual_estate_including_equipped_trinkets_frozen_in_018_raid_contract_and_combined_with_raid_draw_history_for_original_pool_limits"
   }
-}"###)
+}
+"#)
                 .map_err(|e| e.to_string())?;
         let bytes = game
             .overlay
@@ -427,6 +428,7 @@ impl TownSession {
             })
     }
 }
+
 
 #[path = "campaign_runner018.rs"]
 pub mod runner;

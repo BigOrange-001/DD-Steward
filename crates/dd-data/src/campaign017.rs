@@ -84,7 +84,7 @@ pub struct Candidates {
 }
 impl Candidates {
     pub fn documented() -> Result<Self> {
-        serde_json::from_str(r###"{
+        serde_json::from_str(r#"{
   "version": "campaign-candidates-017-v1",
   "source": "Enabled original campaign/quest, campaign/town_events and campaign/progression definitions; execution algorithms remain explicit candidates pending original executable calibration.",
   "semantics": {
@@ -198,7 +198,8 @@ impl Candidates {
   "parameters": {
     "revival_stress": 0
   }
-}"###)
+}
+"#)
             .map_err(|e| e.to_string())
     }
     pub fn validate(&self) -> Result<()> {

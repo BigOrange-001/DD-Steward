@@ -367,3 +367,4 @@ pub(super) fn skill(r: &Record) -> Result<crate::special::BossSkill> {
     s.validate()?;
     Ok(s)
 }
+

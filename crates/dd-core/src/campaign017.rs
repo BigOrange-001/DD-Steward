@@ -148,6 +148,23 @@ pub struct Observation {
     pub expedition: Option<crate::opening015::Observation>,
 }
 impl Session {
+    /// The only host bridge used by replay v2: public hero identities by unit ID.
+    pub(crate) fn replay_hero_guids022(&self) -> Result<Vec<u64>> {
+        if self.state.active.is_some() {
+            Ok(self.expedition()?.replay_hero_guids022())
+        } else if self.farm019_active() {
+            Ok(self
+                .state
+                .city
+                .departure
+                .as_ref()
+                .ok_or("farm deployment absent")?
+                .party
+                .clone())
+        } else {
+            Ok(vec![])
+        }
+    }
     pub fn from_opening(definition: Definition, handoff: TownHandoff, seed: u64) -> Result<Self> {
         let town = TownSession::from_opening(definition.town.clone(), handoff, seed)?;
         Self::from_opening_town(definition, town, seed)
@@ -224,11 +241,14 @@ impl Session {
             definition,
         };
         s.advance_infestation(false)?;
-        s.state.city.campaign = Some(TownContext::new(
-            s.definition.id.clone(),
-            false,
-            s.definition.data.contagion.clone(),
-        ));
+        s.state.city.campaign = Some(
+            TownContext::new(
+                s.definition.id.clone(),
+                false,
+                s.definition.data.contagion.clone(),
+            )
+            .into(),
+        );
         if let Some(rules) = &s.definition.automation {
             s.state.city.campaign.as_mut().unwrap().automation = Some(automation::Owned {
                 rules: (**rules).clone(),
@@ -263,6 +283,15 @@ impl Session {
             definition: self.definition.town.clone(),
             state: self.state.city.clone(),
         }
+    }
+    pub(crate) fn training_quotes025(&self) -> Result<crate::strategy025::training::Catalog> {
+        self.town().training_quotes025()
+    }
+    pub(crate) fn recovery_ranges025(
+        &self,
+        o: &super::Observation,
+    ) -> Result<crate::strategy025::recovery::Ranges> {
+        self.town().recovery_ranges025(o)
     }
     fn transaction<T>(&mut self, run: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
         let mut next = self.clone();
@@ -478,11 +507,14 @@ impl Session {
                 .campaign
                 .as_mut()
                 .and_then(|c| c.automation.take());
-            s.state.city.campaign = Some(TownContext::new(
-                s.definition.id.clone(),
-                districts,
-                s.definition.data.contagion.clone(),
-            ));
+            s.state.city.campaign = Some(
+                TownContext::new(
+                    s.definition.id.clone(),
+                    districts,
+                    s.definition.data.contagion.clone(),
+                )
+                .into(),
+            );
             s.state.city.campaign.as_mut().unwrap().automation = automation;
             s.state.city.campaign.as_mut().unwrap().week = Some(s.state.clock.week);
             s.state.visible_event = event.as_ref().map(|e| e.event.clone());
@@ -560,3 +592,6 @@ impl Session {
         Ok(view)
     }
 }
+
+
+

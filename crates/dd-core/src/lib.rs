@@ -15,31 +15,31 @@ mod boss_scene011;
 pub use boss_scene011::{
     boss_battle, boss_encounter_battle, boss_encounter_battle_in_region, boss_scenario, boss_step,
 };
-
 mod capture011;
 mod control011;
 mod nightmare011;
 pub use boss011::SharedHealthView;
-
 mod lifecycle;
 mod lifecycle_scene;
 pub use lifecycle_scene::{LifecycleBaseline, LifecycleCounts, lifecycle_scenario};
 mod battle_result010;
-
 mod context_scene010;
 mod disease010;
 mod heroes010;
 mod trinkets010;
 pub use battle_result010::{BattleResult, HeroResult, InventoryReceipt};
 pub use context_scene010::{ContextBaseline, context_scenario};
-
 mod scheduling;
-
 mod systems;
 mod tactical;
 mod tactical_scene;
 pub use tactical_scene::{TacticalBaseline, TacticalCounts, tactical_scenario};
-
+pub mod execution024b;
+pub mod execution025;
+mod mechanisms023;
+pub mod preparation024;
+pub mod rollout026;
+mod rounding023;
 mod traits;
 
 pub const PROFILE: &str = "candidate-combat-012";
@@ -334,7 +334,7 @@ impl Unit {
 
 /// Only this owned value is passed to a policy. No RNG, initiative queue,
 /// opponent decision, checkpoint, or reference back to Battle is exposed.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Observation {
     pub candidate_id: String,
     pub farm: Option<WaveView>,
@@ -352,13 +352,13 @@ pub struct Observation {
     pub actions: Vec<LegalAction>,
     pub outcome: Option<Outcome>,
 }
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VisibleBuild {
     pub trinkets: Vec<String>,
     pub quirks: Vec<String>,
     pub diseases: Vec<String>,
 }
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VisibleUnit {
     pub item_uses: Vec<(String, u32)>,
     pub shuffle_remaining: u32,
@@ -400,7 +400,7 @@ pub struct VisibleUnit {
     /// Limited equipped hero skills only. Enemy skill inventories are hidden.
     pub skill_remaining: Vec<(String, u32)>,
 }
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LegalAction {
     pub action: Action,
     pub label: String,
@@ -869,7 +869,14 @@ impl Battle {
                 return Err("surprise outcome contradicts original encounter flags".into());
             }
             if surprise == Surprise::Heroes {
-                b.shuffle_party(0, &mut events);
+                if dd_data::mechanisms023::enabled(
+                    &b.scenario.rules.content,
+                    dd_data::mechanisms023::SURPRISE,
+                ) {
+                    b.surprise_shuffle023(&mut events);
+                } else {
+                    b.shuffle_party(0, &mut events);
+                }
                 b.flush_reactions(&mut events);
             }
         }
@@ -1338,7 +1345,12 @@ impl Battle {
                     .cloned()
                     .collect::<Vec<_>>();
                 let (accuracy, raw_range, _) = self.attack_values(actor, target, s, &extra);
-                let range = raw_range.map(|n| candidate_damage(n, t.stats().protection));
+                let range = if self.rounding023() && !s.target.friendly {
+                    let base = self.damage_bounds023(actor, target, s, &extra);
+                    base.map(|raw| self.damage_value023(actor, target, s, raw))
+                } else {
+                    raw_range.map(|n| candidate_damage(n, t.stats().protection))
+                };
                 actions.push(LegalAction {
                     action: if s.target.random {
                         Action::SkillAuto { skill: idx }
@@ -1354,16 +1366,34 @@ impl Battle {
                     },
                     damage: range,
                     heal: s.heal.unwrap_or([0, 0]).map(|n| {
-                        (f64::from(n) * (1. + u.modifier("hp_heal_percent", "")))
-                            .round()
-                            .max(0.) as i32
+                        if self.rounding023() && self.units[target].blueprint.hero {
+                            let raw = (f64::from(n) + u.modifier("hp_heal_amount", "")).max(0.)
+                                * (1. + u.modifier("hp_heal_percent", "")).clamp(
+                                    self.scenario.rules.heal_buff_percent_min,
+                                    self.scenario.rules.heal_buff_percent_max,
+                                );
+                            return self.healing_received023(target, raw);
+                        }
+                        dd_data::mechanisms023::healing_amount(
+                            f64::from(n) * (1. + u.modifier("hp_heal_percent", "")),
+                            u.blueprint.hero,
+                            &self.scenario.rules.content,
+                        )
                     }),
                     stress_heal: s
                         .effects
                         .iter()
                         .filter_map(|e| {
                             if let EffectKind::Stress(n) = e.kind {
-                                Some((-n).max(0))
+                                Some(if self.rounding023() {
+                                    dd_data::mechanisms023::ceil_final023(
+                                        f64::from((-n).max(0))
+                                            * (1. + u.modifier("stress_heal_percent", "")).max(0.),
+                                    )
+                                    .clamp(0., 1e6) as i32
+                                } else {
+                                    (-n).max(0)
+                                })
                             } else {
                                 None
                             }
@@ -1538,11 +1568,7 @@ impl Battle {
             Action::Item { .. } => unreachable!("items resolve without a paid opportunity"),
             Action::Pass => {
                 events.push(Event::Pass(actor));
-                self.stress_change(
-                    actor,
-                    self.scenario.rules.passed_turn_stress_dmg.round() as i32,
-                    events,
-                );
+                self.stress_float023(actor, self.scenario.rules.passed_turn_stress_dmg, events);
             }
             Action::Move { rank } => {
                 self.voluntary_move(actor, rank, events);
@@ -1769,17 +1795,22 @@ impl Battle {
                             .boss
                             .restrictions
                             .no_crit_effects;
-                    let base = if crit {
-                        let table = if self.units[actor].blueprint.hero {
-                            &self.scenario.rules.player_crit_multiplier_table
-                        } else {
-                            &self.scenario.rules.monster_crit_multiplier_table
-                        };
-                        (f64::from(range[1]) * table[0].value).round() as i32
+                    let amount = if self.rounding023() {
+                        let base = self.damage_base023(actor, target, &s, &extra, Some(crit));
+                        self.direct_damage_float023(actor, target, &s, base, events)
                     } else {
-                        self.rng.range(range)
+                        let base = if crit {
+                            let table = if self.units[actor].blueprint.hero {
+                                &self.scenario.rules.player_crit_multiplier_table
+                            } else {
+                                &self.scenario.rules.monster_crit_multiplier_table
+                            };
+                            (f64::from(range[1]) * table[0].value).round() as i32
+                        } else {
+                            self.rng.range(range)
+                        };
+                        self.direct_damage_amount(actor, target, &s, base, events)
                     };
-                    let amount = self.direct_damage_amount(actor, target, &s, base, events);
                     let living = self.units[target].alive();
                     let hp_before = self.units[target].hp;
                     self.damage(target, amount, crit, events);
@@ -1827,12 +1858,10 @@ impl Battle {
                             .no_kill_relief
                     {
                         let r = &self.scenario.rules.stress;
-                        let (chance, relief) = (
-                            r.killing_blow_relief_chance,
-                            r.killing_blow_stress_relief.round() as i32,
-                        );
+                        let (chance, relief) =
+                            (r.killing_blow_relief_chance, r.killing_blow_stress_relief);
                         if self.rng.roll(chance) {
-                            self.stress_change(actor, -relief, events);
+                            self.stress_float023(actor, -relief, events);
                         }
                     }
                 }
@@ -1906,10 +1935,16 @@ impl Battle {
             if !hit && !s.target.friendly {
                 let stress = self.units[actor]
                     .modifier("stress_on_miss", "STRESS_AMOUNT")
-                    .round()
-                    .clamp(0., 1000000.) as i32;
-                if stress > 0 {
-                    self.stress_change(actor, stress, events);
+                    .clamp(0., 1e6);
+                if self.rounding023() {
+                    if stress > 0. {
+                        self.stress_float023(actor, stress, events);
+                    }
+                } else {
+                    let stress = stress.round() as i32;
+                    if stress > 0 {
+                        self.stress_change(actor, stress, events);
+                    }
                 }
             }
             self.fire_trinkets(actor, target, trinket_event, hit, events);
@@ -2366,7 +2401,7 @@ impl Battle {
                 continue;
             }
             self.actor = Some(id);
-            if self.start_turn_actout(id, events) {
+            if self.quirk_actout023(id, events) || self.start_turn_actout(id, events) {
                 self.actor = None;
                 self.complete_turn(id, events);
                 self.flush_lifecycle(events);
@@ -3428,7 +3463,13 @@ fn validate_scenario(s: &Scenario) -> Result<()> {
                 return Err("riposte effect requires original counter skill".into());
             }
             if u.hero {
-                for t in globals.traits.iter().chain(&u.mechanics.hero.override_defs) {
+                for t in globals
+                    .traits
+                    .iter()
+                    .chain(&u.mechanics.hero.override_defs)
+                    .chain(&u.mechanics.build.quirk_acts023)
+                {
+                    t.validate()?;
                     let names = t
                         .turn_acts
                         .iter()
@@ -3441,7 +3482,14 @@ fn validate_scenario(s: &Scenario) -> Result<()> {
                         .chain(
                             t.reactions
                                 .iter()
-                                .filter(|r| r.chance > 0. && r.id.is_combat())
+                                .filter(|r| {
+                                    r.chance > 0.
+                                        && (r.id.is_combat()
+                                            || dd_data::mechanisms023::enabled(
+                                                &s.rules.content,
+                                                dd_data::mechanisms023::FIXES,
+                                            ))
+                                })
                                 .map(|r| r.data.effect.as_str()),
                         );
                     for name in names.filter(|n| !n.is_empty()) {
@@ -3825,6 +3873,8 @@ fn validate_scenario(s: &Scenario) -> Result<()> {
     Ok(())
 }
 
+
+
 pub mod initial013;
 
 pub mod generate014;
@@ -3853,3 +3903,9 @@ pub use town016::campaign::automation as campaign018;
 
 pub mod auto_policy018;
 pub mod navigation019;
+pub mod tactics021;
+
+mod shared024c;
+pub mod strategy025;
+
+pub mod rollout027;

@@ -216,7 +216,7 @@ pub fn parse_str(text: &str) -> Document {
 }
 
 pub fn parse_file(path: &Path) -> Result<Document, Error> {
-    let bytes = std::fs::read(path)?;
+    let bytes = crate::telemetry024c::read(path)?;
     if bytes.contains(&0) {
         return Err(Error::NotText);
     }
@@ -241,3 +241,4 @@ impl Document {
         self.records.iter().filter(move |r| r.key == key)
     }
 }
+

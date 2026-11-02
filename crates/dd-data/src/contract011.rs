@@ -30,7 +30,9 @@ impl GameData {
     pub fn battle_contract(&self, id: &str) -> Result<Contract> {
         let path = if id.starts_with("plot_color_of_madness_") {
             "campaign/quest/com.quest.plot_quests.json"
-        } else if id.starts_with("plot_darkest_dungeon_") {
+        } else if id.starts_with("plot_darkest_dungeon_")
+            || id.starts_with("plot_trinket_retention_")
+        {
             "campaign/quest/quest.plot_quests.json"
         } else {
             return Err("unknown special battle contract".into());
@@ -38,7 +40,7 @@ impl GameData {
         let mut found = vec![];
         for index in self.overlay.sources(path) {
             let file = self.overlay.layers[index].root.join(path);
-            let raw = std::fs::read(&file).map_err(|e| e.to_string())?;
+            let raw = crate::telemetry024c::read(&file).map_err(|e| e.to_string())?;
             let v: serde_json::Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
             for row in v["plot_quests"]
                 .as_array()

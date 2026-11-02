@@ -209,6 +209,14 @@ fn formations(
     }
     Ok(result)
 }
+///026 may read the original public stall table, never a bound encounter/map source.
+pub(crate) fn rollout_stall026(
+    g: &GameData,
+    region: &str,
+    difficulty: u32,
+) -> Result<Vec<NamedFormation>> {
+    formations(g, region, difficulty, "pool:stall", None, true)
+}
 impl Sources {
     pub fn bind(
         g: &GameData,
@@ -643,3 +651,4 @@ pub fn fingerprint(g: &GameData) -> Result<String> {
     }
     Ok(format!("sha256:{:x}", hash.finalize()))
 }
+

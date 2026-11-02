@@ -185,7 +185,7 @@ pub struct Rules {
     #[serde(flatten)]
     pub stress: StressRules,
     #[serde(default)]
-    pub globals: Option<CombatGlobals>,
+    pub globals: Option<crate::shared027::Shared<CombatGlobals>>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Multiplier {
@@ -530,6 +530,8 @@ pub struct Skill {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TacticalSkill {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_damage023: Option<([i32; 2], f64)>,
     #[serde(default = "true_value")]
     pub crit_valid: bool,
     pub boss: crate::special::BossSkill,
@@ -557,6 +559,7 @@ fn true_value() -> bool {
 impl Default for TacticalSkill {
     fn default() -> Self {
         Self {
+            source_damage023: None,
             crit_valid: true,
             boss: Default::default(),
             valid_modes: vec![],
@@ -603,6 +606,7 @@ pub struct Blueprint {
 }
 
 pub struct GameData {
+    pub quirk_acts023: BTreeMap<String, crate::mechanisms023::QuirkAct>,
     pub root: PathBuf,
     pub rules: Rules,
     pub effects: Document,
@@ -627,11 +631,10 @@ impl GameData {
     }
     pub fn load_with_content(root: &Path, config: crate::content::ContentConfig) -> Result<Self> {
         let overlay = crate::overlay::Overlay::load(root, config)?;
-        let raw_rules: serde_json::Value =
-            serde_json::from_slice(&overlay.read("shared/rules.json")?)
-                .map_err(|e| e.to_string())?;
+        let quirk_acts023 = crate::mechanisms023::load_quirk_acts(&overlay)?;
+        let raw_rules = overlay.json("shared/rules.json")?;
         let mut rules: Rules =
-            serde_json::from_value(raw_rules.clone()).map_err(|e| e.to_string())?;
+            serde_json::from_value((*raw_rules).clone()).map_err(|e| e.to_string())?;
         rules.content = overlay.config.clone();
         crate::rules_inventory012::inventory(&raw_rules, &rules)?;
         rules.validate()?;
@@ -737,7 +740,7 @@ impl GameData {
             )
         };
         let combat_globals_error = globals.as_ref().err().cloned();
-        rules.globals = globals.ok();
+        rules.globals = globals.ok().map(Into::into);
         crate::mechanics::validate_stress(&rules)?;
         let heroes = crate::library::units(&overlay, true)?;
         let monsters = crate::library::units(&overlay, false)?;
@@ -748,6 +751,7 @@ impl GameData {
             brains,
             buffs,
             source_buff_conflicts,
+            quirk_acts023,
             selected_mode_effects,
             traits,
             overlay,
@@ -1262,7 +1266,7 @@ impl GameData {
     }
     pub fn trait_effects_for_class(&self, class: &str) -> Result<BTreeMap<String, Effect>> {
         let mut result = BTreeMap::new();
-        for t in &self
+        for t in self
             .rules
             .globals
             .as_ref()
@@ -1272,6 +1276,8 @@ impl GameData {
                     .unwrap_or_else(|| "missing trait definitions".into())
             })?
             .traits
+            .iter()
+            .chain(self.quirk_acts023.values())
         {
             let names = t
                 .turn_acts
@@ -1285,7 +1291,7 @@ impl GameData {
                 .chain(
                     t.reactions
                         .iter()
-                        .filter(|r| r.chance > 0. && r.id.is_combat())
+                        .filter(|r| r.chance > 0.)
                         .map(|r| r.data.effect.as_str()),
                 );
             for name in names.filter(|n| !n.is_empty()) {
@@ -1329,6 +1335,10 @@ impl GameData {
             }
         }
         Ok(ActorMechanics {
+            player_rounding023: crate::mechanisms023::enabled(
+                &self.overlay.config,
+                crate::mechanisms023::ROUNDING,
+            ),
             family: class.into(),
             deaths_door: buffs_for("buffs")?,
             recovery: buffs_for("recovery_buffs")?,
@@ -1507,6 +1517,18 @@ impl GameData {
                     return Err("invalid extra target count/chance".into());
                 }
                 TacticalSkill {
+                    source_damage023: if !target.friendly
+                        && crate::mechanisms023::enabled(
+                            &self.overlay.config,
+                            crate::mechanisms023::ROUNDING,
+                        ) {
+                        hero.map(|h| -> Result<([i32; 2], f64)> {
+                            Ok((h.damage, 1. + number(r, "dmg")?))
+                        })
+                        .transpose()?
+                    } else {
+                        None
+                    },
                     crit_valid: flag(r, "is_crit_valid", true)?,
                     boss: boss_parser::skill(r)?,
                     hp_range: r
@@ -2092,6 +2114,8 @@ fn monster_stats(r: &Record) -> Result<Stats> {
         move_resist: number(r, "move_resist")?,
     })
 }
+
+
 
 fn select_campaign018_camp_buff(raw: &serde_json::Value) -> Result<serde_json::Value> {
     let variants = raw

@@ -436,7 +436,7 @@ impl Session {
                             kept.push(a);
                         }
                     }
-                    town.state.assets = kept;
+                    town.state.assets = kept.into();
                 }
                 "remove_vampire" => {
                     for h in town.state.heroes.iter_mut().filter(|h| h.state.alive) {

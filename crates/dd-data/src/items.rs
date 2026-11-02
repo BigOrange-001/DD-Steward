@@ -293,3 +293,4 @@ impl GameData {
         Ok(value)
     }
 }
+

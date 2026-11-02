@@ -45,7 +45,7 @@ impl Runtime020 {
         self.enrich(&mut v)?;
         Ok(v)
     }
-    fn enrich(&self, v: &mut Value) -> Result<()> {
+    pub(super) fn enrich(&self, v: &mut Value) -> Result<()> {
         if v.get("steward").is_none() {
             let c = self
                 .inner

@@ -413,3 +413,4 @@ pub(super) fn spec(g: &GameData, d: &Document, turns: u8) -> Result<LifeSpec> {
     }
     Ok(spec)
 }
+

@@ -24,6 +24,7 @@ pub mod library;
 pub mod lifecycle;
 pub mod lighting;
 pub mod mechanics;
+pub mod mechanisms023;
 pub mod mode_effects012;
 pub mod nightmare011;
 pub mod overlay;
@@ -31,7 +32,6 @@ pub mod rules_inventory012;
 mod schema012;
 pub mod special;
 pub mod support;
-
 pub mod trinket010;
 
 use std::path::PathBuf;
@@ -85,3 +85,8 @@ pub mod retention017;
 
 pub mod content019;
 pub mod objectives020;
+
+mod cache024c;
+pub mod telemetry024c;
+
+pub mod shared027;

@@ -269,3 +269,4 @@ fn farm_action(
             .ok_or("no visible farm combat action")?,
     ))
 }
+

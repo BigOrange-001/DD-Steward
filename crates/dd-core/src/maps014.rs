@@ -210,7 +210,7 @@ pub struct Definition {
     secret_tags: BTreeSet<String>,
 }
 impl Definition {
-    pub fn new(map: Map, content: ContentConfig, candidates: Candidates) -> Result<Self> {
+        pub fn new(map: Map, content: ContentConfig, candidates: Candidates) -> Result<Self> {
         content.validate()?;
         candidates.validate()?;
         map.validate()?;
@@ -895,8 +895,26 @@ impl Session {
         Ok(())
     }
     fn retreat_reachable(&self, from: &str, to: &str) -> bool {
+        self.retreat_reachable_mode(from, to, false)
+    }
+    fn retreat_reachable_mode(&self, from: &str, to: &str, csv_corridor: bool) -> bool {
         if !self.definition.map.nodes.contains_key(to) {
             return false;
+        }
+        // A room's area differs from its incident corridor. A retreat to the
+        // previously visited adjacent corridor must not use corridor-area equality.
+        let origin = &self.definition.map.nodes[from];
+        if origin.room
+            && origin.links.iter().any(|link| {
+                link.to == to
+                    && self.state.visited.contains(to)
+                    && link
+                        .hidden
+                        .as_ref()
+                        .is_none_or(|tag| self.state.revealed.contains(tag))
+            })
+        {
+            return true;
         }
         let area = &self.definition.map.nodes[from].area;
         let mut q = std::collections::VecDeque::from([from.to_string()]);
@@ -918,7 +936,11 @@ impl Session {
                         .as_ref()
                         .is_none_or(|tag| self.state.revealed.contains(tag))
                     && (self.definition.map.nodes[&l.to].room
-                        || self.definition.map.nodes[&l.to].area == *area)
+                        || self.definition.map.nodes[&l.to].area == *area
+                        || csv_corridor)
+                    && (!csv_corridor
+                        || self.definition.map.nodes[&l.to].gate.is_none()
+                        || self.state.opened.contains(&l.to))
                 {
                     q.push_back(l.to.clone());
                 }
@@ -928,13 +950,25 @@ impl Session {
     }
     pub fn retreat_from_encounter(&mut self, receipt: &Pending, to: &str) -> Result<()> {
         self.transaction(|s| {
+            if s.state.pending.as_ref() != Some(receipt) || receipt.kind != EventKind::Encounter {
+                return Err("invalid encounter retreat transition".into());
+            }
+            let old_reachable = s.retreat_reachable(&receipt.node, to);
+            let csv_reachable = crate::execution025::options().csv_corridor_retreat
+                && s.definition.map.source.path.ends_with(".csv")
+                && s.retreat_reachable_mode(&receipt.node, to, true);
             if s.state.pending.as_ref() != Some(receipt)
                 || receipt.kind != EventKind::Encounter
                 || !s.state.visited.contains(to)
-                || !s.retreat_reachable(&receipt.node, to)
+                || !(old_reachable || csv_reachable)
                 || s.definition.map.nodes[to].gate.is_some() && !s.state.opened.contains(to)
             {
                 return Err("invalid encounter retreat transition".into());
+            }
+            if !old_reachable {
+                crate::execution025::record(
+                    serde_json::json!({"kind":"csv_corridor_retreat","from":receipt.node,"to":to}),
+                );
             }
             s.state.pending = None;
             s.state.position = to.into();

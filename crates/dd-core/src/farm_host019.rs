@@ -790,13 +790,20 @@ impl Session {
             {
                 continue;
             }
-            let loot = dd_data::opening_spawn015::campaign_monster_loot(
-                game,
-                last,
-                plan.tier.into(),
-                &farm.region,
-                self.farm_curios019()?,
-            )?;
+            let loot = if dd_data::mechanisms023::enabled(
+                &self.definition.data.content,
+                dd_data::mechanisms023::FIXES,
+            ) {
+                dd_data::opening_spawn015::wave_monster_rewards023(game, last)?
+            } else {
+                dd_data::opening_spawn015::campaign_monster_loot(
+                    game,
+                    last,
+                    plan.tier.into(),
+                    &farm.region,
+                    self.farm_curios019()?,
+                )?
+            };
             if !loot.raid_finish_quirks.is_empty() {
                 a.raid_quirks.push((*id, loot.raid_finish_quirks.clone()));
             }
@@ -840,7 +847,12 @@ impl Session {
                         .clone(),
                 );
             }
-            self.farm_draw_in_region019(a, &extra, &farm.region)?;
+            if !dd_data::mechanisms023::enabled(
+                &self.definition.data.content,
+                dd_data::mechanisms023::FIXES,
+            ) {
+                self.farm_draw_in_region019(a, &extra, &farm.region)?;
+            }
             let mut expired = BTreeSet::new();
             for buff in &mut a.camp_buffs {
                 if buff.source.duration_type.as_deref() == Some("combat_end")
@@ -1797,6 +1809,8 @@ impl Session {
             })
             .collect::<Result<Vec<_>>>()?;
         let receipt = crate::expedition017::Return {
+            retention_escape025: false,
+            equipment023: None,
             goal_kills: killed_monsters
                 .iter()
                 .map(|(_, source, last)| (source.clone(), last.clone()))
@@ -2434,3 +2448,5 @@ impl Session {
         k.settle()
     }
 }
+
+

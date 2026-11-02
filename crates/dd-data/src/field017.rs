@@ -93,6 +93,7 @@ fn result(curio: &str, kind: &str, row: &[String]) -> Result<ResultKind> {
 }
 impl Curios {
     pub fn load_campaign(o: &crate::overlay::Overlay) -> Result<Self> {
+        let _profile = crate::telemetry024c::scope("curios_campaign");
         let view = o.campaign_view()?;
         let court = view.config.packages.iter().any(|p| p == "crimson_court");
         let mut all = Self::load_with_court_loot(&view, court)?;

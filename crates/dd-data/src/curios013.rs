@@ -775,3 +775,5 @@ pub fn fixed_journal_page(data: &Value, campaign: bool) -> Result<Option<u32>> {
     known_keys(data, &["min_page_index", "max_page_index"])?;
     Ok(None)
 }
+
+
