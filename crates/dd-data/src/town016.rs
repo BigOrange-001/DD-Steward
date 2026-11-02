@@ -40,7 +40,7 @@ pub struct Candidates {
 }
 impl Candidates {
     pub fn documented() -> Result<Self> {
-        serde_json::from_str(r###"{
+        serde_json::from_str(r#"{
   "version": "town-candidates-016-v1",
   "source": "Original town/estate/roster/upgrade/camping definitions; missing timing and selection algorithms remain explicit candidates pending original executable calibration; https://darkestdungeon.wiki.gg/wiki/Sanitarium; https://darkestdungeon.wiki.gg/wiki/Quirks; https://darkestdungeon.wiki.gg/wiki/Flagellant; https://darkestdungeon.wiki.gg/wiki/Camping; https://darkestdungeon.wiki.gg/wiki/Stage_Coach",
   "caretaker_slots": 1,
@@ -94,7 +94,8 @@ impl Candidates {
   "trinket_slots": 2,
   "camping_slots": 4,
   "currency_precision": 1000000
-}"###)
+}
+"#)
             .map_err(|e| e.to_string())
     }
     pub fn validate(&self) -> Result<()> {

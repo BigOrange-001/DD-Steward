@@ -374,7 +374,12 @@ impl Battle {
                 &[],
                 self.units[actor].attack_context.as_deref(),
             );
-            let reflected = (f64::from(amount) * factor.max(0.)).round().clamp(0., 1e6) as i32;
+            let raw = f64::from(amount) * factor.max(0.);
+            let reflected = if self.rounding023() {
+                self.damage_quant023(target, actor, raw)
+            } else {
+                raw.round().clamp(0., 1e6) as i32
+            };
             if reflected > 0 {
                 self.damage(actor, reflected, false, events);
             }

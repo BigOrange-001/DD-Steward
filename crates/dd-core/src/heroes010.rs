@@ -173,12 +173,19 @@ impl Battle {
             .map(|z| z.amount)
             .sum::<i32>();
         self.units[id].burn = self.units[id].burn.saturating_add(burn).min(1000000);
-        let regen = self.units[id]
-            .modifier("hp_dot_heal", "")
-            .round()
-            .clamp(0., 1e6) as i32;
-        if regen > 0 {
-            self.heal(id, regen, events);
+        if self.rounding023() && self.units[id].blueprint.hero {
+            let regen = self.units[id].modifier("hp_dot_heal", "");
+            if regen > 0. {
+                self.heal_float023(id, regen, events);
+            }
+        } else {
+            let regen = self.units[id]
+                .modifier("hp_dot_heal", "")
+                .round()
+                .clamp(0., 1e6) as i32;
+            if regen > 0 {
+                self.heal(id, regen, events);
+            }
         }
         let stress = self.units[id]
             .blueprint
@@ -189,10 +196,16 @@ impl Battle {
             .find(|m| Some(&m.id) == self.units[id].mode.as_ref())
             .map_or(0, |m| m.stress);
         if stress > 0 {
-            let stress = (f64::from(stress)
-                * (1. + self.units[id].modifier("stress_dmg_received_percent", "mode")).max(0.))
-            .round() as i32;
-            self.stress_change(id, stress, events);
+            if self.rounding023() {
+                let raw = f64::from(stress)
+                    * (1. + self.units[id].modifier("stress_dmg_received_percent", "mode")).max(0.);
+                self.stress_float023(id, raw, events);
+            } else {
+                let stress = (f64::from(stress)
+                    * (1. + self.units[id].modifier("stress_dmg_received_percent", "mode")).max(0.))
+                .round() as i32;
+                self.stress_change(id, stress, events);
+            }
         }
     }
     pub(super) fn hero_door(&mut self, id: UnitId, events: &mut Vec<Event>) {

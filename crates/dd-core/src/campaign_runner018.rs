@@ -201,15 +201,37 @@ impl Runtime {
         &mut self,
         navigation: Option<&mut crate::navigation019::Memory>,
     ) -> Result<Option<Record>> {
+        self.step_inner_with_combat(navigation, None)
+    }
+    fn step_inner_with_combat(
+        &mut self,
+        navigation: Option<&mut crate::navigation019::Memory>,
+        mut combat: Option<&mut CombatChoice021<'_>>,
+    ) -> Result<Option<Record>> {
         let before = self.observe()?;
         self.terminal(&before)?;
         if self.status != Status::Running {
             return Ok(None);
         }
         let before_summary = summary(&before)?;
-        let (action, reason) = match (&mut self.actor, &before) {
+        let policy_view023 = mechanisms023::policy_view(&before);
+        let (action, reason) = match (&mut self.actor, policy_view023.as_ref().unwrap_or(&before)) {
             (Actor::Opening(s), View::Opening(o)) => {
-                let a = crate::opening_policy015::choose(o)?;
+                let mut a = crate::opening_policy015::choose(o)?;
+                let mut reason = "按可见观察完成老路与首次废墟".to_string();
+                if matches!(a, crate::opening015::Action::Fight(_))
+                    && let (Some(policy), Some(b)) = (combat.as_mut(), o.battle.as_ref())
+                {
+                    let mut legal = b.clone();
+                    legal.actions.retain(|a| {
+                        o.actions
+                            .contains(&crate::opening015::Action::Fight(a.action.clone()))
+                    });
+                    if let Some((choice, why)) = policy(&legal)? {
+                        a = crate::opening015::Action::Fight(choice);
+                        reason = why;
+                    }
+                }
                 s.act(a.clone())?;
                 let json = json!({"Opening":a});
                 if s.observe()?.phase == crate::opening015::Phase::Finished {
@@ -220,15 +242,45 @@ impl Runtime {
                         self.config.seed,
                     )?));
                 }
-                (json, "按可见观察完成老路与首次废墟".into())
+                (json, reason)
             }
             (Actor::Campaign(s), View::Campaign(o)) => {
                 let mut next = self.memory.clone();
-                let Decision { action, reason } = if let Some(memory) = navigation {
+                let Decision {
+                    mut action,
+                    mut reason,
+                } = if let Some(memory) = navigation {
                     crate::navigation019::choose(o, &mut next, memory)?
                 } else {
                     auto_policy018::choose(o, &mut next)?
                 };
+                let battle = combat
+                    .as_ref()
+                    .and_then(|_| combat_observation021(o, &action));
+                if let (Some(policy), Some(b)) = (combat.as_mut(), battle)
+                    && let Some((choice, why)) = policy(&b)?
+                {
+                    action = match action {
+                        Action::Farm(_)
+                            if choice == crate::Action::Retreat
+                                && o.content019
+                                    .as_ref()
+                                    .and_then(|c| c.farm.as_ref())
+                                    .is_some_and(|f| {
+                                        f.actions.contains(
+                                            &crate::campaign017::content019::farm::Action::Exit,
+                                        )
+                                    }) =>
+                        {
+                            Action::Farm(crate::campaign017::content019::farm::Action::Exit)
+                        }
+                        Action::Farm(_) => Action::Farm(
+                            crate::campaign017::content019::farm::Action::Fight(choice),
+                        ),
+                        _ => Action::Raid(crate::opening015::Action::Fight(choice)),
+                    };
+                    reason = why;
+                }
                 match action.clone() {
                     Action::Town(a) => s.town_action(a)?,
                     Action::Event(a) => s.event_action(a)?,
@@ -515,7 +567,69 @@ pub fn render(v: &Value, step: u64, status: &Status, action: &str, reason: &str)
     s
 }
 
+
 #[path = "runner019.rs"]
 pub mod content019;
 #[path = "runner020.rs"]
 pub mod steward020;
+/// A combat-only policy receives an owned, filtered observation, never host state.
+type CombatChoice021<'a> =
+    dyn FnMut(&crate::Observation) -> Result<Option<(crate::Action, String)>> + 'a;
+#[path = "runner021.rs"]
+pub mod arena021;
+#[path = "runner023.rs"]
+pub mod mechanisms023;
+#[path = "runner024.rs"]
+pub mod preparation024;
+#[path = "replay022.rs"]
+pub mod replay022;
+#[path = "runner025.rs"]
+pub mod strategy025;
+
+/// Intersect the combat preview with the outer host's public legal actions.
+/// Farm Exit is a real legal guaranteed escape, represented here as the policy's
+/// Retreat intent and translated back on execution; no combat result is invented.
+fn combat_observation021(o: &Observation, action: &Action) -> Option<crate::Observation> {
+    match action {
+        Action::Raid(crate::opening015::Action::Fight(_)) => {
+            let raid = o.expedition.as_ref()?;
+            let mut b = raid.battle.clone()?;
+            b.actions.retain(|a| {
+                raid.actions
+                    .contains(&crate::opening015::Action::Fight(a.action.clone()))
+            });
+            Some(b)
+        }
+        Action::Farm(crate::campaign017::content019::farm::Action::Fight(_)) => {
+            use crate::campaign017::content019::farm::Action as FarmAction;
+            let farm = o.content019.as_ref()?.farm.as_ref()?;
+            let mut b = farm.battle.clone();
+            let exit = farm.actions.contains(&FarmAction::Exit);
+            b.actions.retain(|a| {
+                farm.actions.contains(&FarmAction::Fight(a.action.clone()))
+                    || (exit && a.action == crate::Action::Retreat)
+            });
+            if exit && !b.actions.iter().any(|a| a.action == crate::Action::Retreat) {
+                b.actions.push(crate::LegalAction {
+                    action: crate::Action::Retreat,
+                    label: "farm_exit".into(),
+                    targets: vec![],
+                    hit_chance: 1.,
+                    damage: [0, 0],
+                    heal: [0, 0],
+                    stress_heal: 0,
+                });
+            }
+            Some(b)
+        }
+        _ => None,
+    }
+}
+
+#[path = "runner026.rs"]
+pub mod rollout026;
+
+#[path = "human030.rs"]
+pub mod human030;
+#[path = "runner027.rs"]
+pub mod rollout027;

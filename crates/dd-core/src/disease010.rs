@@ -40,6 +40,25 @@ impl Battle {
         let Some(ctx) = self.scenario.rules.context.clone() else {
             return false;
         };
+        // Existing disease incompatibility semantics reject an infection.025
+        // also checks ordinary quirks named by the same original source list.
+        if crate::execution025::options().disease_quirk_conflicts
+            && d.incompatible.iter().any(|q| {
+                self.units[id]
+                    .blueprint
+                    .mechanics
+                    .build
+                    .input
+                    .quirks
+                    .contains(q)
+                    || self.units[id].diseases.contains(q)
+            })
+        {
+            crate::execution025::record(
+                serde_json::json!({"kind":"disease_quirk_conflict","hero":id,"class":self.units[id].blueprint.id,"disease":d.id}),
+            );
+            return false;
+        }
         let mut slots = self.units[id]
             .diseases
             .iter()

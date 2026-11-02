@@ -28,7 +28,7 @@ pub(super) struct Pool {
     pub max: i32,
     pub base_max: i32,
 }
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SharedHealthView {
     pub id: String,
     pub members: Vec<UnitId>,
@@ -181,6 +181,7 @@ impl Battle {
                 || u.alive()
                 || source != &u.source_id
                 || u.blueprint.mechanics.lifecycle.lifetime.is_none()
+                    && !crate::execution025::shrieker_escape_source(self, *id)
             {
                 return Err("invalid escaped entity handoff".into());
             }

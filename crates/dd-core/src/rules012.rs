@@ -138,7 +138,39 @@ impl Battle {
             self.scenario.rules.heal_buff_percent_max,
         );
         let flat = self.units[actor].modifier("hp_heal_amount", "");
-        let amount = ((raw + flat).max(0.) * factor).round().clamp(0., 1e6) as i32;
+        if self.rounding023() && self.units[target].blueprint.hero {
+            let value = (raw + flat).max(0.) * factor;
+            if value > 0.
+                && self.reaction_block(actor, target, ReactionKind::BlockHeal, None, events)
+            {
+                return;
+            }
+            let rules = self.scenario.rules.candidates.healing.clone();
+            let critical = eligible
+                && self.rng.roll(if multi {
+                    rules.multi_chance
+                } else {
+                    rules.single_chance
+                });
+            let amount = self
+                .healing_received023(target, value * if critical { rules.multiplier } else { 1. });
+            self.heal_final023(target, amount, events);
+            if critical {
+                events.push(Event::CriticalHeal {
+                    actor,
+                    target,
+                    raw: raw.round().clamp(0., 1e6) as i32,
+                    amount,
+                });
+                self.stress_change(target, -rules.target_stress_relief, events);
+            }
+            return;
+        }
+        let amount = dd_data::mechanisms023::healing_amount(
+            (raw + flat).max(0.) * factor,
+            self.units[target].blueprint.hero,
+            &self.scenario.rules.content,
+        );
         if amount > 0 && self.reaction_block(actor, target, ReactionKind::BlockHeal, None, events) {
             return;
         }
@@ -150,9 +182,11 @@ impl Battle {
                 rules.single_chance
             });
         let amount = if critical {
-            (f64::from(amount) * rules.multiplier)
-                .round()
-                .clamp(0., 1e6) as i32
+            dd_data::mechanisms023::healing_amount(
+                f64::from(amount) * rules.multiplier,
+                self.units[target].blueprint.hero,
+                &self.scenario.rules.content,
+            )
         } else {
             amount
         };
@@ -180,10 +214,29 @@ impl Battle {
     ) {
         let rules = self.scenario.rules.candidates.healing.clone();
         let critical = eligible && self.rng.roll(rules.single_chance);
+        if self.rounding023() && self.units[target].blueprint.hero {
+            let healed = self.healing_received023(
+                target,
+                f64::from(amount) * if critical { rules.multiplier } else { 1. },
+            );
+            self.heal_final023(target, healed, events);
+            if critical {
+                events.push(Event::CriticalHeal {
+                    actor: target,
+                    target,
+                    raw: amount,
+                    amount: healed,
+                });
+                self.stress_change(target, -rules.target_stress_relief, events);
+            }
+            return;
+        }
         let healed = if critical {
-            (f64::from(amount) * rules.multiplier)
-                .round()
-                .clamp(0., 1e6) as i32
+            dd_data::mechanisms023::healing_amount(
+                f64::from(amount) * rules.multiplier,
+                self.units[target].blueprint.hero,
+                &self.scenario.rules.content,
+            )
         } else {
             amount
         };

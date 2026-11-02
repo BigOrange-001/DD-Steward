@@ -2,6 +2,7 @@ use super::*;
 
 #[derive(Clone, Copy)]
 pub(super) struct CampaignSettlement<'a> {
+    pub equipment023: Option<&'a crate::expedition017::equipment023::Receipt>,
     pub advance: bool,
     pub regroup: bool,
     pub physical: &'a [TrinketState],
@@ -897,56 +898,117 @@ impl Session {
         let mut keep = BTreeSet::new();
         let mut new_assets = vec![];
         let mut recovered_seen = BTreeSet::new();
-        for (guid, h) in &returned {
-            let mut owned = self
+        if let Some(receipt) = campaign.and_then(|c| c.equipment023) {
+            let departed = self
                 .state
                 .assets
                 .iter()
-                .filter(|a| {
-                    departure.assets.contains(&a.instance)
-                        && a.owner.is_some_and(|(id, _)| id == *guid)
-                })
+                .filter(|a| departure.assets.contains(&a.instance))
                 .cloned()
                 .collect::<Vec<_>>();
-            owned.sort_by_key(|a| a.owner.unwrap().1);
-            let slots = h
-                .trinket_slots
-                .as_ref()
-                .ok_or("missing native physical slot receipt")?;
-            if slots.len() != h.trinkets.len()
-                || slots.iter().collect::<BTreeSet<_>>().len() != slots.len()
-            {
-                return Err("invalid native physical slot receipt".into());
-            }
-            for (state, native_slot) in h.trinkets.iter().zip(slots) {
-                state.validate()?;
-                if state.destroyed {
-                    continue;
+            let mut used = BTreeSet::new();
+            let mut occupied = BTreeSet::new();
+            for item in &receipt.carried {
+                item.state.validate()?;
+                if item.state.destroyed
+                    || self.definition.trinket(&item.state.definition.id)? != item.state.definition
+                {
+                    return Err("invalid task 023 returned equipment source".into());
                 }
-                if self.definition.trinket(&state.definition.id)? != state.definition {
-                    return Err("returned trinket source differs".into());
-                }
-                let a = owned
-                    .get(*native_slot)
-                    .ok_or("unowned returned equipment slot")?
-                    .clone();
-                let graph = self
-                    .definition
-                    .game
-                    .trinket_catalog(std::slice::from_ref(&a.state.definition.id))?;
-                if !graph.contains_key(&state.definition.id) {
-                    return Err("returned physical slot changed to unrelated equipment".into());
-                }
-                if h.alive || recovered.contains(&a.instance) {
-                    if !h.alive {
-                        recovered_seen.insert(a.instance);
+                if let Some((guid, slot)) = item.holder {
+                    let h = returned
+                        .get(&guid)
+                        .ok_or("foreign returned equipment holder")?;
+                    if !h.alive
+                        || slot >= 2
+                        || !occupied.insert((guid, slot))
+                        || h.build.physical_trinkets.as_ref().and_then(|v| v.get(slot))
+                            != Some(&item.state)
+                    {
+                        return Err("equipment placement differs from actual native holder".into());
                     }
-                    keep.insert(a.instance);
-                    new_assets.push(Asset {
-                        instance: a.instance,
-                        state: state.clone(),
-                        owner: if h.alive { a.owner } else { None },
-                    });
+                }
+                let instance = if let Some((guid, slot)) = item.origin {
+                    let mut owned = departed
+                        .iter()
+                        .filter(|a| a.owner.is_some_and(|(id, _)| id == guid))
+                        .collect::<Vec<_>>();
+                    owned.sort_by_key(|a| a.owner.unwrap().1);
+                    let original = owned.get(slot).ok_or("foreign returned equipment origin")?;
+                    if !used.insert(original.instance)
+                        || !self
+                            .definition
+                            .game
+                            .trinket_catalog(std::slice::from_ref(&original.state.definition.id))?
+                            .contains_key(&item.state.definition.id)
+                    {
+                        return Err("duplicate or unrelated transferred equipment".into());
+                    }
+                    original.instance
+                } else {
+                    let n = self.state.next_asset;
+                    self.state.next_asset = n.checked_add(1).ok_or("asset identity overflow")?;
+                    n
+                };
+                keep.insert(instance);
+                new_assets.push(Asset {
+                    instance,
+                    state: item.state.clone(),
+                    owner: item.holder,
+                });
+            }
+        } else {
+            for (guid, h) in &returned {
+                let mut owned = self
+                    .state
+                    .assets
+                    .iter()
+                    .filter(|a| {
+                        departure.assets.contains(&a.instance)
+                            && a.owner.is_some_and(|(id, _)| id == *guid)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                owned.sort_by_key(|a| a.owner.unwrap().1);
+                let slots = h
+                    .trinket_slots
+                    .as_ref()
+                    .ok_or("missing native physical slot receipt")?;
+                if slots.len() != h.trinkets.len()
+                    || slots.iter().collect::<BTreeSet<_>>().len() != slots.len()
+                {
+                    return Err("invalid native physical slot receipt".into());
+                }
+                for (state, native_slot) in h.trinkets.iter().zip(slots) {
+                    state.validate()?;
+                    if state.destroyed {
+                        continue;
+                    }
+                    if self.definition.trinket(&state.definition.id)? != state.definition {
+                        return Err("returned trinket source differs".into());
+                    }
+                    let a = owned
+                        .get(*native_slot)
+                        .ok_or("unowned returned equipment slot")?
+                        .clone();
+                    let graph = self
+                        .definition
+                        .game
+                        .trinket_catalog(std::slice::from_ref(&a.state.definition.id))?;
+                    if !graph.contains_key(&state.definition.id) {
+                        return Err("returned physical slot changed to unrelated equipment".into());
+                    }
+                    if h.alive || recovered.contains(&a.instance) {
+                        if !h.alive {
+                            recovered_seen.insert(a.instance);
+                        }
+                        keep.insert(a.instance);
+                        new_assets.push(Asset {
+                            instance: a.instance,
+                            state: state.clone(),
+                            owner: if h.alive { a.owner } else { None },
+                        });
+                    }
                 }
             }
         }
@@ -1554,6 +1616,13 @@ impl Session {
         }
         if q["is_disease"] != false {
             return Err("missing town quirk category".into());
+        }
+        if crate::execution025::quirk_disease_conflict(
+            &self.definition.data.base.quirk_defs,
+            id,
+            &self.state.heroes[i].state.diseases,
+        )? {
+            return Ok(());
         }
         let positive = q["is_positive"].as_bool().ok_or("missing quirk sign")?;
         let singleton = q["tags"]

@@ -239,6 +239,58 @@ pub struct MonsterLoot {
     pub raid_finish_quirks: Vec<String>,
     pub notes: Vec<String>,
 }
+/// Wave encounters pay their source-valued shard/threshold/curio rewards, not
+/// ordinary map-battle loot. Keep independent raid-finish quirk obligations.
+pub fn wave_monster_rewards023(g: &GameData, id: &str) -> Result<MonsterLoot> {
+    if !crate::mechanisms023::enabled(&g.overlay.config, crate::mechanisms023::FIXES) {
+        return Err("wave reward protocol requires task 023 identity".into());
+    }
+    let suffix = format!("/{id}/{id}.info.darkest");
+    let path = g
+        .overlay
+        .combat_files("monsters/", ".info.darkest")
+        .into_iter()
+        .find(|p| p.ends_with(&suffix))
+        .ok_or("missing wave monster reward source")?;
+    let d = library::read_document(&g.overlay, &path)?;
+    let mut result = MonsterLoot {
+        draws: vec![],
+        raid_finish_quirks: vec![],
+        notes: vec![],
+    };
+    for row in d.records_keyed("loot") {
+        if row.param("raid_finish_quirk_class_id").is_some() {
+            if row.params.len() != 1 {
+                return Err("mixed wave raid-finish quirk record".into());
+            }
+            let quirk = text(row, "raid_finish_quirk_class_id")?;
+            library::unique_json(&g.quirks()?, quirk, "wave raid-finish quirk")?;
+            result.raid_finish_quirks.push(quirk.into());
+        } else {
+            if row
+                .params
+                .iter()
+                .any(|p| !["code", "count"].contains(&p.name.as_str()))
+            {
+                return Err("unknown wave monster loot field".into());
+            }
+            let code = text(row, "code")?;
+            if (code.is_empty() || code == "NONE")
+                && row.param("count").is_some_and(|p| p.values.is_empty())
+            {
+                continue;
+            }
+            let count = number(row, "count")?;
+            if count.fract() != 0. || !(0. ..=1000.).contains(&count) {
+                return Err("invalid wave ordinary loot metadata".into());
+            }
+            result.notes.push(format!(
+                "{id}: ordinary map loot {code} x{count} does not apply to wave reward protocol"
+            ));
+        }
+    }
+    Ok(result)
+}
 pub fn campaign_monster_loot(
     g: &GameData,
     id: &str,

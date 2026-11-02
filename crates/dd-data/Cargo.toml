@@ -8,5 +8,5 @@ publish.workspace = true
 [dependencies]
 csv = "1"
 sha2 = "0.10"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }

@@ -21,6 +21,8 @@ pub struct Build {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct BuildState {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quirk_acts023: Vec<crate::mechanisms023::QuirkAct>,
     pub trinkets: Vec<crate::trinket010::TrinketState>,
     pub trinket_catalog: BTreeMap<String, crate::trinket010::Trinket>,
     pub sets: BTreeMap<String, Vec<Buff>>,
@@ -93,6 +95,7 @@ impl GameData {
             .map_or_else(|| outside(raw), |a| !a.is_empty() && a.iter().all(outside)))
     }
     pub fn quirks(&self) -> Result<BTreeMap<String, serde_json::Value>> {
+        let _profile = crate::telemetry024c::scope("quirk_map");
         library::json_library(
             &self.overlay,
             "shared/quirk/",
@@ -101,6 +104,7 @@ impl GameData {
         )
     }
     pub fn disease_catalog(&self) -> Result<BTreeMap<String, Disease>> {
+        let _profile = crate::telemetry024c::scope("disease_parse");
         let mut out = BTreeMap::new();
         for (id, raw) in self.quirks()? {
             let raw = if let Some(variants) = raw.as_array() {
@@ -483,6 +487,7 @@ impl GameData {
             return Err("build quirk capacity exceeded".into());
         }
         hero.mechanics.build = BuildState {
+            quirk_acts023: self.quirk_acts023.values().cloned().collect(),
             trinkets: equipped,
             trinket_catalog: definitions,
             sets,
@@ -501,9 +506,7 @@ impl GameData {
         surprise: Surprise,
         stall: bool,
     ) -> Result<BattleContext> {
-        let raw: serde_json::Value =
-            serde_json::from_slice(&self.overlay.read("shared/rules.json")?)
-                .map_err(|e| e.to_string())?;
+        let raw = self.overlay.json("shared/rules.json")?;
         let get = |k: &str| {
             raw[k]
                 .as_u64()
@@ -647,3 +650,4 @@ impl BattleContext {
         Ok(())
     }
 }
+

@@ -116,3 +116,4 @@ pub(crate) fn quirk_fields(value: &serde_json::Value) -> Result<()> {
     }
     Ok(())
 }
+

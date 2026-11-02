@@ -10,6 +10,8 @@ pub use camping::{Action as CampAction, View as CampView};
 pub(crate) use camping::{VisibleEffect, VisibleSkill};
 #[path = "expedition_assets017.rs"]
 mod assets;
+#[path = "equipment023.rs"]
+pub(crate) mod equipment023;
 pub(crate) use assets::Carried;
 pub use assets::ItemView;
 pub const PROFILE: &str = "candidate-expedition-017";
@@ -48,6 +50,8 @@ pub(crate) struct RaidQuirk {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Progress {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    equipment023: Option<equipment023::Ledger>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     shared_goal_kills: Vec<(String, String)>,
     physical_bag: BTreeMap<usize, Carried>,
@@ -63,6 +67,8 @@ pub(super) struct Progress {
     ends_infestation: bool,
     terminal: Option<crate::events017::ReturnKind>,
     pub(super) auxiliary: Option<Auxiliary>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) retention_escape025: bool,
     partial_scout: BTreeMap<String, BTreeSet<String>>,
     deaths_door: BTreeSet<u64>,
     progress_before_return: Option<(u32, u32)>,
@@ -220,6 +226,8 @@ impl Persistent {
 /// Fields are private outside the crate; a policy cannot assert completion.
 #[derive(Debug, Clone)]
 pub(crate) struct Return {
+    pub retention_escape025: bool,
+    pub equipment023: Option<equipment023::Receipt>,
     pub goal_kills: Vec<(String, String)>,
     pub token: String,
     pub kind: crate::events017::ReturnKind,
@@ -437,8 +445,7 @@ impl Session {
             .as_deref()
             .ok_or("not a campaign expedition".into())
     }
-
-    fn persistent_source_id(&self) -> Result<String> {
+        fn persistent_source_id(&self) -> Result<String> {
         use sha2::{Digest, Sha256};
         Ok(format!(
             "sha256:{:x}",
@@ -473,6 +480,7 @@ impl Session {
             return Ok(None);
         }
         let mut progress = self.state.campaign.as_ref().unwrap().clone();
+        progress.equipment023 = None;
         progress.physical_bag.clear();
         progress.physical_tray.clear();
         progress.terminal = None;
@@ -1002,6 +1010,73 @@ impl Session {
                     .ok_or("unbound reinforcement".into())
             })
             .collect::<Result<Vec<_>>>()?;
+        Ok(())
+    }
+    pub(super) fn retention_escape_result025(
+        &mut self,
+        result: &crate::BattleResult,
+    ) -> Result<()> {
+        if !crate::execution025::options().shrieker_contract
+            || result.outcome != Outcome::HeroesWin
+            || result.escaped_monsters.is_empty()
+            || self.state.party.is_empty()
+        {
+            return Ok(());
+        }
+        let Some(c) = self
+            .definition
+            .campaign
+            .as_ref()
+            .and_then(|s| s.context.automation.as_ref())
+            .and_then(|a| a.contract.as_ref())
+        else {
+            return Ok(());
+        };
+        if !c.id.starts_with("plot_trinket_retention_") {
+            return Ok(());
+        }
+        let target_escaped = self
+            .spec()?
+            .sources
+            .goals
+            .values()
+            .filter(|g| g["type"] == "kill_monster")
+            .any(|g| {
+                g["data"]["monster_class_ids"]
+                    .as_array()
+                    .is_some_and(|ids| {
+                        result
+                            .escaped_monsters
+                            .iter()
+                            .any(|(_, s)| ids.iter().any(|id| id == s))
+                    })
+            });
+        if target_escaped {
+            self.state.campaign.as_mut().unwrap().retention_escape025 = true;
+            crate::execution025::record(
+                json!({"kind":"shrieker_target_escaped","classes":result.escaped_monsters,"counts_as_kill":false}),
+            );
+        }
+        Ok(())
+    }
+    pub(super) fn retention_escape_finish025(&mut self) -> Result<()> {
+        if crate::execution025::options().shrieker_contract
+            && self
+                .state
+                .campaign
+                .as_ref()
+                .is_some_and(|p| p.retention_escape025 && p.terminal.is_none())
+            && self.state.battle.is_none()
+            && self.state.loot.is_empty()
+            && self.map()?.pending().is_none()
+            && !self.state.party.is_empty()
+        {
+            let complete = self.campaign_ready()?;
+            crate::execution025::record(
+                json!({"kind":"shrieker_forced_return","objective_complete":complete,"counts_as_kill":false}),
+            );
+            self.campaign_finish_cause025(complete, true)?;
+        }
         Ok(())
     }
     pub(super) fn campaign_battle_result(
@@ -1752,6 +1827,9 @@ impl Session {
         if purge {
             build.quirks.retain(|id| id != &chosen);
         } else {
+            if crate::execution025::quirk_disease_conflict(defs, &chosen, &build.diseases)? {
+                return Ok(());
+            }
             let q = dd_data::library::unique_json(defs, &chosen, "curio quirk")?;
             let sign = q["is_positive"].as_bool().ok_or("missing quirk sign")?;
             let locked = self
@@ -2014,11 +2092,29 @@ impl Session {
         Ok(())
     }
     pub(super) fn campaign_finish(&mut self, complete: bool) -> Result<()> {
+        self.campaign_finish_cause025(complete, false)
+    }
+    pub(super) fn campaign_finish_cause025(
+        &mut self,
+        complete: bool,
+        escaped_contract: bool,
+    ) -> Result<()> {
         use crate::events017::ReturnKind;
+        if escaped_contract
+            && !(crate::execution025::options().shrieker_contract
+                && self
+                    .state
+                    .campaign
+                    .as_ref()
+                    .is_some_and(|p| p.retention_escape025))
+        {
+            return Err("unproven025 contract return".into());
+        }
         if self.state.phase != Phase::Expedition || self.state.battle.is_some() {
             return Err("unsettled expedition cannot return".into());
         }
         if !complete
+            && !escaped_contract
             && !self.state.party.is_empty()
             && let Some(contract) = self
                 .spec()?
@@ -2132,6 +2228,8 @@ impl Session {
             .as_ref()
             .ok_or("not a campaign sortie")?;
         Ok(Return {
+            retention_escape025: p.retention_escape025,
+            equipment023: self.equipment_receipt023()?,
             goal_kills: p
                 .kills
                 .iter()
@@ -2217,3 +2315,5 @@ fn source_stack(v: &Value) -> Result<Stack> {
         amount: dd_data::campaign017::uint(v, "amount")?,
     })
 }
+
+

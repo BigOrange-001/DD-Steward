@@ -38,7 +38,7 @@ pub struct Interlude {
     pub boss_shards: [u32; 2],
     pub threshold_multiplier: f64,
 }
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WaveView {
     pub reflection: Option<String>,
     pub group: u32,

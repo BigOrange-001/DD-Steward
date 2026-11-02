@@ -242,14 +242,20 @@ impl Unit {
             (base + modifier("combat_stat_add", sub))
                 * (1. + modifier("combat_stat_multiply", sub)).max(0.)
         };
-        s.hp = stat(f64::from(s.hp), "max_hp").round().clamp(1., 1e6) as i32;
+        let integer_stat = |v: f64| {
+            if self.blueprint.hero && self.blueprint.mechanics.player_rounding023 {
+                dd_data::mechanisms023::ceil_final023(v)
+            } else {
+                v.round()
+            }
+        };
+        s.hp = integer_stat(stat(f64::from(s.hp), "max_hp")).clamp(1., 1e6) as i32;
         s.dodge = stat(s.dodge, "defense_rating");
         s.protection = stat(s.protection, "protection_rating").clamp(0., 1.);
         s.accuracy = stat(s.accuracy, "attack_rating");
         s.crit = stat(s.crit, "crit_chance");
-        s.speed = stat(f64::from(s.speed), "speed_rating")
-            .round()
-            .clamp(-10000., 10000.) as i32;
+        s.speed =
+            integer_stat(stat(f64::from(s.speed), "speed_rating")).clamp(-10000., 10000.) as i32;
         s.stun_resist += modifier("resistance", "stun");
         s.bleed_resist += modifier("resistance", "bleed");
         s.blight_resist += modifier("resistance", "poison");
@@ -349,8 +355,7 @@ impl Battle {
             value: self.units[target].stress,
         });
     }
-
-    pub(super) fn add_buff(
+        pub(super) fn add_buff(
         &mut self,
         target: UnitId,
         definition: Buff,
@@ -391,7 +396,16 @@ impl Battle {
                 .stun_recovery
                 .iter()
                 .any(|b| b.id == definition.id);
+        let damage_debuff023 = scope == BuffScope::Timed
+            && definition.amount < 0.
+            && definition.stat_type == "combat_stat_multiply"
+            && ["damage_low", "damage_high"].contains(&definition.stat_sub_type.as_str())
+            && dd_data::mechanisms023::enabled(
+                &self.scenario.rules.content,
+                dd_data::mechanisms023::DEBUFF,
+            );
         if !stack_override
+            && !damage_debuff023
             && !matches!(scope, BuffScope::Build | BuffScope::Disease)
             && (scope != BuffScope::Timed || !stack)
         {
@@ -434,16 +448,27 @@ impl Battle {
         }
     }
     pub(super) fn heal(&mut self, target: UnitId, amount: i32, events: &mut Vec<Event>) {
+        self.heal_float023(target, f64::from(amount), events);
+    }
+    pub(super) fn healing_received023(&self, target: UnitId, amount: f64) -> i32 {
+        dd_data::mechanisms023::healing_amount(
+            amount
+                * (1. + self.units[target].modifier("hp_heal_received_percent", "")).clamp(
+                    self.scenario.rules.heal_buff_percent_min,
+                    self.scenario.rules.heal_buff_percent_max,
+                ),
+            self.units[target].blueprint.hero,
+            &self.scenario.rules.content,
+        )
+    }
+    pub(super) fn heal_float023(&mut self, target: UnitId, amount: f64, events: &mut Vec<Event>) {
+        let amount = self.healing_received023(target, amount);
+        self.heal_final023(target, amount, events);
+    }
+    pub(super) fn heal_final023(&mut self, target: UnitId, amount: i32, events: &mut Vec<Event>) {
         if !self.units[target].alive() {
             return;
         }
-        let amount = (f64::from(amount)
-            * (1. + self.units[target].modifier("hp_heal_received_percent", "")).clamp(
-                self.scenario.rules.heal_buff_percent_min,
-                self.scenario.rules.heal_buff_percent_max,
-            ))
-        .round()
-        .clamp(0., 1e6) as i32;
         if self.shared_heal(target, amount, events) {
             return;
         }
@@ -473,6 +498,10 @@ impl Battle {
         }
     }
     pub(super) fn stress_change(&mut self, target: UnitId, raw: i32, events: &mut Vec<Event>) {
+        if self.rounding023() && (raw < 0 || !self.scenario.monsters.is_empty()) {
+            self.stress_float023(target, f64::from(raw), events);
+            return;
+        }
         if raw == 0 || !self.units[target].alive() || !self.units[target].blueprint.hero {
             return;
         }
@@ -681,17 +710,14 @@ impl Battle {
     pub(super) fn death_stress(&mut self, target: UnitId, events: &mut Vec<Event>) {
         self.end_stealth(target, StealthEndReason::Death, events);
         let r = &self.scenario.rules.stress;
-        let (chance, amount) = (
-            r.death_party_stress_chance,
-            r.death_party_stress_damage.round() as i32,
-        );
+        let (chance, amount) = (r.death_party_stress_chance, r.death_party_stress_damage);
         for id in 0..self.units.len() {
             if id != target
                 && self.units[id].blueprint.hero
                 && self.units[id].alive()
                 && self.rng.roll(chance)
             {
-                self.stress_change(id, amount, events);
+                self.stress_float023(id, amount, events);
             }
         }
     }
@@ -715,7 +741,7 @@ impl Battle {
             )
         };
         if self.rng.roll(own_chance) {
-            self.stress_change(target, own.round() as i32, events);
+            self.stress_float023(target, own, events);
         }
         for id in 0..self.units.len() {
             if id != target
@@ -723,7 +749,7 @@ impl Battle {
                 && self.units[id].alive()
                 && self.rng.roll(other_chance)
             {
-                self.stress_change(id, other.round() as i32, events);
+                self.stress_float023(id, other, events);
             }
         }
     }
@@ -753,7 +779,7 @@ impl Battle {
         let main = if hero { actor } else { target };
         let sign = if hero { -1 } else { 1 };
         if self.rng.roll(chance) {
-            self.stress_change(main, sign * amount.round() as i32, events);
+            self.stress_float023(main, f64::from(sign) * amount, events);
         }
         for id in 0..self.units.len() {
             if id != main
@@ -761,7 +787,7 @@ impl Battle {
                 && self.units[id].alive()
                 && self.rng.roll(others)
             {
-                self.stress_change(id, sign * other_amount.round() as i32, events);
+                self.stress_float023(id, f64::from(sign) * other_amount, events);
             }
         }
     }
@@ -1232,6 +1258,20 @@ impl Battle {
                         });
                     }
                     EffectKind::Stun => self.units[id].stunned = true,
+                    EffectKind::Stress(n)
+                        if self.rounding023() && (*n < 0 || !self.scenario.monsters.is_empty()) =>
+                    {
+                        let modifier = if *n < 0 {
+                            self.units[actor].modifier("stress_heal_percent", "")
+                        } else {
+                            self.units[actor].modifier_for(
+                                "stress_dmg_percent",
+                                "",
+                                self.lifecycle.last_skill.as_deref(),
+                            )
+                        };
+                        self.stress_float023(id, f64::from(*n) * (1. + modifier).max(0.), events);
+                    }
                     EffectKind::Stress(n) => {
                         let amount = if *n < 0 {
                             (f64::from(*n)
@@ -1249,7 +1289,7 @@ impl Battle {
                                 .max(0.))
                             .round() as i32
                         };
-                        self.stress_change(id, amount, events);
+                        self.stress_float023(id, f64::from(amount), events);
                     }
                     EffectKind::Heal(n) => self.skill_heal(
                         actor,
@@ -1369,6 +1409,7 @@ impl Battle {
                 } else {
                     Some(self.target_weights(actor, skill, actions, &brain)?)
                 };
+                let desire_weight = weight.max(0.);
                 let weight = if targets
                     .as_ref()
                     .is_none_or(|weights| weights.iter().any(|w| *w > 0.))
@@ -1377,9 +1418,77 @@ impl Battle {
                 } else {
                     0.
                 };
-                Ok((skill, weight, actions, targets))
+                Ok((skill, weight, actions, targets, desire_weight))
             })
             .collect::<Result<Vec<_>>>()?;
+        // W-080 extension025: all final skill weights are nonpositive. Prefer
+        // skills that still have a positive target, then sample legal targets.
+        // Explicit source opt-out remains an error; this precedes the old scope
+        // without changing its standalone024 behavior.
+        if crate::execution025::options().zero_final_weights
+            && brain.ignore_desires_on_single_valid_skill != Some(false)
+            && weighted.iter().all(|x| x.1 <= 0.)
+        {
+            let positive_targets = weighted
+                .iter()
+                .map(|x| x.3.as_ref().is_none_or(|ws| ws.iter().any(|w| *w > 0.)))
+                .collect::<Vec<_>>();
+            let any_positive = positive_targets.iter().any(|v| *v);
+            let weights = positive_targets
+                .iter()
+                .map(|v| if !any_positive || *v { 1. } else { 0. })
+                .collect::<Vec<_>>();
+            let selected = self.weighted_index(&weights)?;
+            let (skill, _, actions, targets, _) = &weighted[selected];
+            let index = if let Some(targets) = targets {
+                if targets.iter().any(|w| *w > 0.) {
+                    self.weighted_index(targets)?
+                } else {
+                    self.weighted_index(&vec![1.; actions.len()])?
+                }
+            } else {
+                0
+            };
+            crate::execution025::record(
+                serde_json::json!({"kind":"zero_final_weights","monster":self.units[actor].blueprint.id,"actor":actor,"round":self.round,"turn":self.units[actor].turns,"skill":self.units[actor].blueprint.skills[*skill].id,"action":actions[index].action,"preferred_positive_targets":any_positive}),
+            );
+            return Ok(actions[index].action.clone());
+        }
+        // W-080 candidate, enabled only by the 024 host execution scope. This
+        // does not rescue zero skill desire when any positive target exists.
+        if crate::execution024b::enabled()
+            && brain.ignore_desires_on_single_valid_skill != Some(false)
+            && weighted.iter().all(|(_, _, _, targets, _)| {
+                targets
+                    .as_ref()
+                    .is_some_and(|ws| ws.iter().all(|w| *w <= 0.))
+            })
+        {
+            let mut desires = weighted.iter().map(|x| x.4).collect::<Vec<_>>();
+            let total = desires.iter().sum::<f64>();
+            if !total.is_finite() {
+                return Err("nonfinite AI skill weight sum".into());
+            }
+            if total <= 0. {
+                desires.fill(1.);
+            }
+            let selected = self.weighted_index(&desires)?;
+            let (skill, _, actions, _, _) = &weighted[selected];
+            let index = self.weighted_index(&vec![1.; actions.len()])?;
+            let Action::Skill { target, .. } = actions[index].action else {
+                return Err("024b fallback requires an explicit legal target".into());
+            };
+            crate::execution024b::record(crate::execution024b::Fallback {
+                monster: self.units[actor].blueprint.id.clone(),
+                actor,
+                round: self.round,
+                turn: self.units[actor].turns,
+                skill: self.units[actor].blueprint.skills[*skill].id.clone(),
+                target,
+                target_class: self.units[target].blueprint.id.clone(),
+            });
+            return Ok(actions[index].action.clone());
+        }
         let selected = self
             .weighted_index(&weighted.iter().map(|x| x.1).collect::<Vec<_>>())
             .map_err(|e| {
@@ -1395,11 +1504,11 @@ impl Battle {
                         .collect::<Vec<_>>(),
                     weighted
                         .iter()
-                        .map(|(s, w, _, t)| (&self.units[actor].blueprint.skills[*s].id, *w, t))
+                        .map(|(s, w, _, t, _)| (&self.units[actor].blueprint.skills[*s].id, *w, t))
                         .collect::<Vec<_>>()
                 )
             })?;
-        let (_, _, actions, weights) = &weighted[selected];
+        let (_, _, actions, weights, _) = &weighted[selected];
         if matches!(actions[0].action, Action::SkillAuto { .. }) {
             return Ok(actions[0].action.clone());
         }

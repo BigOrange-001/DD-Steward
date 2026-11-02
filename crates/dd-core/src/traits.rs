@@ -119,44 +119,69 @@ impl Battle {
         {
             return false;
         }
-        let reaction = self
-            .trait_def(target)
-            .and_then(|t| t.reactions.iter().find(|r| r.id == kind))
-            .cloned();
-        let Some(r) = reaction else {
-            return false;
-        };
-        if kind == ReactionKind::BlockEffect && effect != Some(r.data.effect.as_str()) {
-            return false;
+        for t in self.behavior_defs023(target) {
+            let Some(r) = t.reactions.iter().find(|r| r.id == kind) else {
+                continue;
+            };
+            if kind == ReactionKind::BlockEffect && effect != Some(r.data.effect.as_str()) {
+                continue;
+            }
+            if r.chance <= 0. || !self.rng.roll(r.chance) {
+                continue;
+            }
+            events.push(Event::Refused {
+                actor: source,
+                target,
+                kind,
+                effect: effect.map(str::to_owned),
+            });
+            return true;
         }
-        if r.chance <= 0. || !self.rng.roll(r.chance) {
-            return false;
+        false
+    }
+    pub(super) fn behavior_defs023(&self, actor: UnitId) -> Vec<TraitDef> {
+        let mut defs = self
+            .trait_def(actor)
+            .cloned()
+            .into_iter()
+            .collect::<Vec<_>>();
+        if dd_data::mechanisms023::enabled(
+            &self.scenario.rules.content,
+            dd_data::mechanisms023::FIXES,
+        ) {
+            let u = &self.units[actor];
+            defs.extend(
+                u.blueprint
+                    .mechanics
+                    .build
+                    .quirk_acts023
+                    .iter()
+                    .filter(|t| {
+                        u.blueprint.mechanics.build.input.quirks.contains(&t.id)
+                            || u.diseases.contains(&t.id)
+                    })
+                    .cloned(),
+            );
         }
-        events.push(Event::Refused {
-            actor: source,
-            target,
-            kind,
-            effect: effect.map(str::to_owned),
-        });
-        true
+        defs
     }
     pub(super) fn queue_reaction(&mut self, reactor: UnitId, kind: ReactionKind, subject: UnitId) {
         if !self.units[reactor].alive() {
             return;
         }
-        let Some(t) = self.trait_def(reactor) else {
-            return;
-        };
-        if t.reactions.iter().any(|r| r.id == kind && r.chance > 0.) {
-            self.pending_reactions.push_back(ReactionJob {
-                reactor,
-                trait_id: t.id.clone(),
-                resolve_epoch: self.units[reactor].resolve_epoch,
-                kind,
-                subject,
-            });
+        for t in self.behavior_defs023(reactor) {
+            if t.reactions.iter().any(|r| r.id == kind && r.chance > 0.) {
+                self.pending_reactions.push_back(ReactionJob {
+                    reactor,
+                    trait_id: t.id,
+                    resolve_epoch: self.units[reactor].resolve_epoch,
+                    kind,
+                    subject,
+                });
+            }
         }
     }
+
     pub(super) fn attack_reactions(&mut self, actor: UnitId, target: UnitId, hit: bool) {
         if self.units[target].blueprint.hero {
             self.queue_reaction(
@@ -215,14 +240,17 @@ impl Battle {
             if !self.units[job.reactor].alive() {
                 continue;
             }
-            if self.units[job.reactor].resolve_epoch != job.resolve_epoch {
-                continue;
-            }
             let reaction = self
-                .trait_def(job.reactor)
-                .filter(|t| t.id == job.trait_id)
-                .and_then(|t| t.reactions.iter().find(|r| r.id == job.kind))
-                .cloned();
+                .behavior_defs023(job.reactor)
+                .into_iter()
+                .find(|t| {
+                    t.id == job.trait_id
+                        && (self
+                            .trait_def(job.reactor)
+                            .is_none_or(|resolve| resolve.id != t.id)
+                            || self.units[job.reactor].resolve_epoch == job.resolve_epoch)
+                })
+                .and_then(|t| t.reactions.into_iter().find(|r| r.id == job.kind));
             let Some(r) = reaction else {
                 continue;
             };
@@ -314,13 +342,13 @@ impl Battle {
                 self.schedule_death(id, false, events);
             }
             let stress = if self.scenario.rules.farm.is_some() {
-                0
+                0.
             } else {
-                self.scenario.rules.combat_retreat_stress.round() as i32
+                self.scenario.rules.combat_retreat_stress
             };
             for id in 0..self.units.len() {
                 if self.units[id].blueprint.hero && self.units[id].alive() {
-                    self.stress_change(id, stress, events);
+                    self.stress_float023(id, stress, events);
                 }
             }
             // Existing queued primary-action reactions are still resolved before
@@ -334,9 +362,17 @@ impl Battle {
         if !self.units[actor].friendly() {
             return false;
         }
-        let Some(t) = self.trait_def(actor) else {
+        let Some(t) = self.trait_def(actor).cloned() else {
             return false;
         };
+        self.run_turn_table023(actor, &t, events)
+    }
+    pub(super) fn run_turn_table023(
+        &mut self,
+        actor: UnitId,
+        t: &TraitDef,
+        events: &mut Vec<Event>,
+    ) -> bool {
         let choices = t
             .turn_acts
             .iter()
@@ -397,6 +433,14 @@ impl Battle {
                     let id = allies[self.rng.below(allies.len() as u64) as usize];
                     self.apply_external_effect(actor, id, effect.as_ref().unwrap(), events);
                 }
+                false
+            }
+            TurnKind::HealSelf if self.rounding023() => {
+                self.heal_float023(
+                    actor,
+                    f64::from(self.units[actor].stats().hp) * a.data.number_value,
+                    events,
+                );
                 false
             }
             TurnKind::HealSelf => {

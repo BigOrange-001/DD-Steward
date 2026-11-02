@@ -16,7 +16,7 @@ pub struct ItemView {
     pub growth: Vec<(String, String, f64)>,
 }
 impl Session {
-    fn physical_definition(&self, id: &str) -> Result<dd_data::trinket010::Trinket> {
+    pub(super) fn physical_definition(&self, id: &str) -> Result<dd_data::trinket010::Trinket> {
         let cached = self
             .definition
             .cache
@@ -41,7 +41,7 @@ impl Session {
             .extend(catalog);
         Ok(value)
     }
-    fn validate_physical_definition(&self, state: &TrinketState) -> Result<()> {
+    pub(super) fn validate_physical_definition(&self, state: &TrinketState) -> Result<()> {
         self.definition.game.validate_item_growth(state)?;
         if self.physical_definition(&state.definition.id)? != state.definition {
             return Err("carried item definition differs from original source".into());
@@ -97,6 +97,14 @@ impl Session {
         Ok(())
     }
     fn update_dead_equipment(&mut self, origin: (u64, usize), state: &TrinketState) -> Result<()> {
+        if self
+            .state
+            .campaign
+            .as_ref()
+            .is_some_and(|p| p.equipment023.is_some())
+        {
+            return Ok(());
+        }
         let index = self.hero_index(origin.0)?;
         let hero = &mut self.state.heroes[index];
         if hero.state.alive {
@@ -192,6 +200,14 @@ impl Session {
         Ok(gained)
     }
     pub(in super::super) fn validate_physical_items(&self) -> Result<()> {
+        if self
+            .state
+            .campaign
+            .as_ref()
+            .is_some_and(|p| p.equipment023.is_some())
+        {
+            return self.validate_equipment023();
+        }
         let Some(p) = &self.state.campaign else {
             return Ok(());
         };
@@ -332,7 +348,7 @@ impl Session {
                     .ok_or("missing dropped equipment slots")?;
                 for (state, slot) in h.trinkets.iter().zip(slots) {
                     items.push(Carried {
-                        origin: Some((guid, *slot)),
+                        origin: self.dropped_origin023(guid, *slot, state)?,
                         state: state.clone(),
                     });
                 }
@@ -365,3 +381,5 @@ impl Session {
         Ok(())
     }
 }
+
+

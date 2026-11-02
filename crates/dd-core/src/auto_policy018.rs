@@ -288,6 +288,10 @@ fn choose_quest(o: &Observation, m: &Memory) -> Option<(QuestView, Vec<u64>)> {
         })
         .min_by_key(|(q, _)| (q.difficulty, q.length, q.id.clone()))
 }
+/// Read-only access for the new final recovery layer; the old policy is unchanged.
+pub(crate) fn recovery_selection024b(o: &Observation, m: &Memory) -> Option<(QuestView, Vec<u64>)> {
+    choose_quest(o, m)
+}
 fn talismans(o: &Observation, q: &QuestView, p: &[u64]) -> Option<TownAction> {
     if q.plot.as_deref() != Some("plot_darkest_dungeon_2") {
         return None;
@@ -346,6 +350,15 @@ fn protected_has(t: &town016::Observation, id: u64) -> bool {
     t.party.contains(&id) && t.heroes.iter().any(|h| h.guid == id && h.class != "vestal")
 }
 pub fn choose(o: &Observation, m: &mut Memory) -> Result<Decision> {
+    choose_with_city025(o, m, crate::campaign_policy017::city)
+}
+/// Additive025 adapter: a caller can suppress a city stage it already owns.
+/// The original entry passes the unchanged city policy above.
+pub(crate) fn choose_with_city025(
+    o: &Observation,
+    m: &mut Memory,
+    city: fn(&crate::town016::Observation) -> Option<TownAction>,
+) -> Result<Decision> {
     if m.version != VERSION {
         return Err("unknown autonomous policy memory version".into());
     }
@@ -559,7 +572,7 @@ pub fn choose(o: &Observation, m: &mut Memory) -> Result<Decision> {
     }
     if m.quest.is_none()
         && m.town_steps < 200
-        && let Some(a) = crate::campaign_policy017::city(&o.town)
+        && let Some(a) = city(&o.town)
     {
         return Ok(decide(Action::Town(a), "治疗、学习技能、提升装备和建筑"));
     }
@@ -605,7 +618,7 @@ pub fn choose(o: &Observation, m: &mut Memory) -> Result<Decision> {
                 |c| !matches!(c.action,TownAction::Equip{instance,..} if dd.contains(&instance)),
             );
         }
-        if let Some(a) = crate::campaign_policy017::city(&visible)
+        if let Some(a) = city(&visible)
             && !matches!(a, TownAction::Party(_) | TownAction::Hire { .. })
         {
             return Ok(decide(Action::Town(a), "强化已选队伍，保留出征预算"));

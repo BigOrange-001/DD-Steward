@@ -54,6 +54,29 @@ pub fn json_library_ordered(
     suffix: &str,
     array: &str,
 ) -> Result<(BTreeMap<String, Value>, Vec<String>)> {
+    Ok((*json_library_arc(overlay, prefix, suffix, array)?).clone())
+}
+pub type JsonLibrary = (BTreeMap<String, Value>, Vec<String>);
+pub fn json_library_arc(
+    overlay: &Overlay,
+    prefix: &str,
+    suffix: &str,
+    array: &str,
+) -> Result<std::sync::Arc<JsonLibrary>> {
+    let files = overlay.combat_files(prefix, suffix);
+    overlay.cached(
+        &format!("json_library:{prefix}:{suffix}:{array}"),
+        &files,
+        || json_library_uncached(overlay, prefix, suffix, array),
+    )
+}
+fn json_library_uncached(
+    overlay: &Overlay,
+    prefix: &str,
+    suffix: &str,
+    array: &str,
+) -> Result<JsonLibrary> {
+    let _span = crate::telemetry024c::scope("parse_json_library");
     let mut map = BTreeMap::new();
     let mut order = vec![];
     let mut files = overlay.combat_files(prefix, suffix);
@@ -179,3 +202,4 @@ pub fn unique_unit<'a>(
     }
     Ok(&variants[0])
 }
+

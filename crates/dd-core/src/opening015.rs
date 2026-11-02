@@ -79,6 +79,12 @@ impl Definition {
             game.info_documents(true).map(records).collect::<Vec<_>>(),
         ))
         .map_err(|e| e.to_string())?;
+        let inputs =
+            if dd_data::mechanisms023::enabled(&data.content, dd_data::mechanisms023::FIXES) {
+                serde_json::to_vec(&(&inputs, &game.quirk_acts023)).map_err(|e| e.to_string())?
+            } else {
+                inputs
+            };
         let id = format!("{EXP_PROFILE};sha256:{:x}", Sha256::digest(inputs));
         let maps = data
             .levels
@@ -339,26 +345,60 @@ pub struct Session {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Action {
+    EquipTrinket {
+        hero: u64,
+        bag_slot: usize,
+        equipment_slot: usize,
+    },
+    UnequipTrinket {
+        hero: u64,
+        equipment_slot: usize,
+    },
     Move(String),
     Unlock(String),
     Camp(campaign::CampAction),
     Backstep(String),
-    Interact { hero: u64, item: Option<String> },
-    Use { hero: u64, slot: usize },
-    Discard { slot: usize, amount: u32 },
-    Take { index: usize, amount: u32 },
+    Interact {
+        hero: u64,
+        item: Option<String>,
+    },
+    Use {
+        hero: u64,
+        slot: usize,
+    },
+    Discard {
+        slot: usize,
+        amount: u32,
+    },
+    Take {
+        index: usize,
+        amount: u32,
+    },
     LeaveLoot,
-    Obstacle { shovel: bool },
-    Hunger { eat: bool },
-    Disarm { hero: u64 },
+    Obstacle {
+        shovel: bool,
+    },
+    Hunger {
+        eat: bool,
+    },
+    Disarm {
+        hero: u64,
+    },
     Fight(crate::Action),
-    Leave { complete: bool },
-    Buy { item: Item, amount: u32 },
+    Leave {
+        complete: bool,
+    },
+    Buy {
+        item: Item,
+        amount: u32,
+    },
     Embark,
     Reorder(Vec<u64>),
 }
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct VisibleHero {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub equipped023: Option<Vec<campaign::equipment023::EquippedView>>,
     pub guid: u64,
     pub name: String,
     pub class: String,
@@ -398,6 +438,15 @@ pub struct Observation {
     pub camping: Option<campaign::CampView>,
 }
 impl Session {
+        /// Player-visible identity only; unit IDs index the frozen battle deployment,
+    /// never the current (possibly reordered or reduced) expedition party.
+    pub(crate) fn replay_hero_guids022(&self) -> Vec<u64> {
+        if self.state.battle.is_some() {
+            self.state.battle_party.clone()
+        } else {
+            vec![]
+        }
+    }
     pub fn new(definition: Definition, seed: u64) -> Result<Self> {
         let d = &definition.data;
         let torch = d.raid_source["data"]["party"]["torchlight"]
@@ -743,6 +792,20 @@ impl Session {
         }
         Ok(n)
     }
+    fn manual_food_limit(&self) -> Result<u32> {
+        if dd_data::mechanisms023::enabled(
+            &self.definition.data.content,
+            dd_data::mechanisms023::FIXES,
+        ) {
+            self.definition.data.globals["max_provisions_before_full"]
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|n| *n > 0)
+                .ok_or("invalid original manual food limit".into())
+        } else {
+            Ok(self.definition.data.candidates.manual_food_limit)
+        }
+    }
     fn field(&mut self, run: impl FnOnce(&mut PartyKernel) -> Result<()>) -> Result<()> {
         self.field_with_hp_policy(run, false)
     }
@@ -836,7 +899,7 @@ impl Session {
             }
         }
         for (id, n) in &s.food_uses {
-            if !ids.contains(id) || *n > self.definition.data.candidates.manual_food_limit {
+            if !ids.contains(id) || *n > self.manual_food_limit()? {
                 return Err("invalid food satiation state".into());
             }
         }
@@ -947,6 +1010,7 @@ impl Session {
         }
     }
     pub fn observe(&self) -> Result<Observation> {
+        let manual_food_limit = self.manual_food_limit()?;
         let m = self.map()?;
         let mut map_observation = m.observe();
         for n in &mut map_observation.nodes {
@@ -1163,7 +1227,7 @@ impl Session {
                                 if s.item.kind != "provision"
                                     || h.state.hp < h.state.max_hp
                                         && self.state.food_uses.get(id).copied().unwrap_or(0)
-                                            < self.definition.data.candidates.manual_food_limit
+                                            < manual_food_limit
                                 {
                                     actions.push(Action::Use { hero: *id, slot });
                                 }
@@ -1194,11 +1258,13 @@ impl Session {
             permutations(&mut v, 0, &mut actions);
         }
         actions.extend(self.camp_idle_actions()?.into_iter().map(Action::Camp));
+        actions.extend(self.equipment_actions023());
         let heroes = self
             .state
             .heroes
             .iter()
             .map(|h| VisibleHero {
+                equipped023: self.equipped_view023(h.guid),
                 guid: h.guid,
                 name: h.name.clone(),
                 class: h.state.class.clone(),
@@ -1211,11 +1277,7 @@ impl Session {
                 quirks: h.state.build.quirks.clone(),
                 skills: h.base.skills.iter().map(|s| s.id.clone()).collect(),
                 xp: h.xp,
-                food_remaining: self
-                    .definition
-                    .data
-                    .candidates
-                    .manual_food_limit
+                food_remaining: manual_food_limit
                     .saturating_sub(self.state.food_uses.get(&h.guid).copied().unwrap_or(0)),
             })
             .collect();
@@ -1341,12 +1403,22 @@ impl Session {
                 self.state.wallet.insert("gold:".into(), gold - price);
                 *self.state.store.get_mut(&item.key()).unwrap() -= amount;
             }
+            Action::EquipTrinket {
+                hero,
+                bag_slot,
+                equipment_slot,
+            } => self.equip_trinket023(hero, bag_slot, equipment_slot)?,
+            Action::UnequipTrinket {
+                hero,
+                equipment_slot,
+            } => self.unequip_trinket023(hero, equipment_slot)?,
             Action::Embark => self.embark()?,
             Action::Reorder(ids) => self.state.party = ids,
         }
         if self.definition.campaign.is_some() {
             self.campaign_reveal_layout()?;
             self.campaign_skip_hunger()?;
+            self.retention_escape_finish025()?;
         }
         if self.state.battle.is_none()
             && self.state.loot.is_empty()
@@ -1370,6 +1442,7 @@ impl Session {
             self.finish(false)?;
         }
         self.campaign_sync_keys()?;
+        self.sync_equipment023()?;
         Ok(())
     }
 
@@ -2238,7 +2311,14 @@ impl Session {
                         self.draws(&self.extra_loot(None)?)?;
                         self.dark_bonus("battle")?;
                         self.map_settle()?;
-                        if self.state.loot.is_empty() {
+                        self.retention_escape_result025(&result)?;
+                        if self.state.loot.is_empty()
+                            && !self
+                                .state
+                                .campaign
+                                .as_ref()
+                                .is_some_and(|p| p.retention_escape025)
+                        {
                             self.forced_curio()?;
                         }
                     }
@@ -2583,9 +2663,7 @@ impl Session {
             if h.state.hp >= h.state.max_hp {
                 return Err("hero does not need food healing".into());
             }
-            if self.state.food_uses.get(&hero).copied().unwrap_or(0)
-                >= self.definition.data.candidates.manual_food_limit
-            {
+            if self.state.food_uses.get(&hero).copied().unwrap_or(0) >= self.manual_food_limit()? {
                 return Err("hero is satiated".into());
             }
             *self.state.food_uses.entry(hero).or_default() += 1;
@@ -2593,10 +2671,12 @@ impl Session {
             return self.field(|k| {
                 k.hp(
                     id,
-                    (f64::from(k.maximum(id))
-                        * ratio
-                        * (1. + k.modifier(id, "hp_heal_received_percent", "eat")).max(0.))
-                    .round() as i32,
+                    dd_data::mechanisms023::food_amount(
+                        f64::from(k.maximum(id))
+                            * ratio
+                            * (1. + k.modifier(id, "hp_heal_received_percent", "eat")).max(0.),
+                        &k.core.scenario.rules.content,
+                    ),
                 )?;
                 Ok(())
             });
@@ -3135,6 +3215,7 @@ impl Session {
         json!({"phase":self.state.phase,"deaths":self.state.heroes.iter().filter(|h|!h.state.alive).count(),"survivors":self.state.heroes.iter().filter(|h|h.state.alive).count(),"battles":self.state.battles,"interactions":self.state.interactions,"steps":self.state.steps,"results":self.state.results.iter().map(|r|json!({"level":r.level,"outcome":r.outcome,"xp":r.xp})).collect::<Vec<_>>()})
     }
 }
+
 
 #[derive(Clone, Serialize)]
 pub struct TownHandoff {

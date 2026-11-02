@@ -122,7 +122,7 @@ impl Definition {
             } else {
                 None
             },
-            candidate: serde_json::from_str(r###"{
+            candidate: serde_json::from_str(r#"{
   "version": "candidate-content-019-v1",
   "source": "enabled original town/quest/wave sources; task019 explicit candidates, awaiting original calibration",
   "semantics": {
@@ -150,7 +150,8 @@ impl Definition {
     "https://steamcommunity.com/sharedfiles/filedetails/?id=819597757&l=english"
   ],
   "calibration": "All numerical values are parsed from enabled local original inputs; external descriptions motivate candidates only. No claim of original-executable equivalence or production training suitability."
-}"###)
+}
+"#)
             .map_err(|e| e.to_string())?,
         };
         if let Some(curios) = &rules.farm_curios {
@@ -529,3 +530,4 @@ impl Session {
         })
     }
 }
+

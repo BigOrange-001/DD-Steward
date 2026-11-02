@@ -127,6 +127,22 @@ impl ContentConfig {
     pub fn validate(&self) -> Result<()> {
         for (id, choice) in &self.syntax_choices {
             let package = match (id.as_str(), choice.as_str()) {
+                ("mechanisms023", "candidate-mechanisms-023-v1") => "base",
+                (
+                    "food_ceil023"
+                    | "hero_heal_ceil023"
+                    | "surprise_derangement023"
+                    | "timed_debuff_stacks023"
+                    | "player_rounding023",
+                    "user-experience-v1",
+                ) => {
+                    if self.syntax_choices.get("mechanisms023").map(String::as_str)
+                        != Some(crate::mechanisms023::PROFILE)
+                    {
+                        return Err("023 candidate requires task 023 identity".into());
+                    }
+                    "base"
+                }
                 ("difficulty_effect_source", "mode_file") => "base",
                 ("camp_hp_recovery_conflict", "larger_original_penalty") => "base",
                 ("legacy_global_boundary", "outside_combat_v1") => "base",
@@ -239,3 +255,4 @@ impl ContentConfig {
         Ok(())
     }
 }
+

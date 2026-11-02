@@ -778,3 +778,4 @@ fn json_fields(node: &mut Node, prefix: &str, value: &Value) {
         _ => {}
     }
 }
+

@@ -567,6 +567,32 @@ impl Session {
             discarded: BTreeMap::new(),
         })
     }
+    /// Read-only quote of the visible task shop for the actual current party.
+    /// Does not prepare/generate a map, roll loot, spend money or advance RNG.
+    pub(crate) fn preparation_quote024b(&self, id: &str) -> Result<Provisions> {
+        let q = self
+            .state
+            .board
+            .entries
+            .iter()
+            .find(|q| q.id == id)
+            .ok_or("024b quote requires a visible quest")?
+            .clone();
+        let p = self.provision_template(q)?;
+        Ok(Provisions {
+            quest: p.quest.id,
+            party: p.party,
+            inventory: p.bag,
+            store: p
+                .store
+                .iter()
+                .map(|(i, n)| (i.clone(), *n, p.prices[i]))
+                .collect(),
+            paid: 0,
+            actions: vec![],
+            currencies019: p.commerce019.map(|c| c.currencies),
+        })
+    }
     pub(super) fn provision_view(&self) -> Result<Option<Provisions>> {
         let Some(p) = &self.state.preparation else {
             return Ok(None);
@@ -816,7 +842,15 @@ impl Session {
             self.state.clock.week,
         ))
         .map_err(|e| e.to_string())?;
-        Ok(format!("raid-definition:{:x}", Sha256::digest(bytes)))
+        let mut key = format!("raid-definition:{:x}", Sha256::digest(bytes));
+        if crate::execution025::options().shrieker_contract
+            && q.plot
+                .as_deref()
+                .is_some_and(|p| p.starts_with("plot_trinket_retention_"))
+        {
+            key.push_str(";025-shrieker-contract");
+        }
+        Ok(key)
     }
     fn expedition_sources(
         &self,
@@ -1003,7 +1037,12 @@ impl Session {
                 automation: if self.definition.automation.is_some() {
                     Some(super::automation::RaidRules {
                         owned_trinkets: town.owned_rewards(),
-                        contract: if q.raw["dungeon"] == "darkestdungeon" {
+                        contract: if q.raw["dungeon"] == "darkestdungeon"
+                            || crate::execution025::options().shrieker_contract
+                                && q.plot
+                                    .as_deref()
+                                    .is_some_and(|p| p.starts_with("plot_trinket_retention_"))
+                        {
                             Some(game.battle_contract(
                                 q.plot.as_deref().ok_or("DD plot identity absent")?,
                             )?)
@@ -1377,7 +1416,11 @@ impl Session {
             .collect::<Vec<_>>();
         let mut recovered = BTreeSet::new();
         let mut acquired = vec![];
-        for item in &receipt.recovered {
+        for item in receipt
+            .recovered
+            .iter()
+            .filter(|_| receipt.equipment023.is_none())
+        {
             self.definition
                 .town
                 .game
@@ -1425,7 +1468,16 @@ impl Session {
                 .ok_or("week overflow")?,
         );
         self.close_event_plots(&mut town, active.quest.plot.as_deref(), complete, advance)?;
-        if complete {
+        if complete
+            || crate::execution025::options().shrieker_contract
+                && receipt.retention_escape025
+                && receipt.heroes.iter().any(|(_, h)| h.alive)
+                && active
+                    .quest
+                    .plot
+                    .as_deref()
+                    .is_some_and(|p| p.starts_with("plot_trinket_retention_"))
+        {
             self.recover_quest_assets(&mut town, &active.quest)?;
         }
         let quirk_key = if complete {
@@ -1447,6 +1499,7 @@ impl Session {
             complete,
             recovered,
             Some(CampaignSettlement {
+                equipment023: receipt.equipment023.as_ref(),
                 advance,
                 regroup: receipt.kind == ReturnKind::Regroup,
                 physical: &acquired,
@@ -1467,7 +1520,36 @@ impl Session {
         }
         // Unrecovered equipment retains its actual final state, not a freshly
         // minted copy of the initial definition. Destroyed items cannot return.
-        for original in &departed_assets {
+        if let Some(equipment) = &receipt.equipment023 {
+            let carried = equipment
+                .carried
+                .iter()
+                .filter_map(|i| i.origin)
+                .collect::<BTreeSet<_>>();
+            for item in equipment
+                .originals
+                .iter()
+                .filter(|i| !i.state.destroyed && !carried.contains(&i.origin))
+            {
+                let mut originals = departed_assets
+                    .iter()
+                    .filter(|a| a.owner.is_some_and(|(guid, _)| guid == item.origin.0))
+                    .collect::<Vec<_>>();
+                originals.sort_by_key(|a| a.owner.unwrap().1);
+                let original = originals
+                    .get(item.origin.1)
+                    .ok_or("foreign lost transferred equipment")?;
+                self.record_lost_asset(Asset {
+                    instance: original.instance,
+                    state: item.state.clone(),
+                    owner: None,
+                })?;
+            }
+        }
+        for original in departed_assets
+            .iter()
+            .filter(|_| receipt.equipment023.is_none())
+        {
             if town
                 .state
                 .campaign
@@ -1741,3 +1823,8 @@ impl Session {
         Ok(false)
     }
 }
+
+
+
+
+

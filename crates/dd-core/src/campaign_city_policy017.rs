@@ -171,6 +171,14 @@ fn building(o: &Observation, reserve: u32) -> Option<Action> {
 }
 /// Return one idempotent next decision, or None when ready to select a quest.
 pub fn city(o: &Observation) -> Option<Action> {
+    city_with_skill_selection(o, true)
+}
+/// 025 owns its loadout stage; filtering action cards alone cannot suppress
+/// SelectSkills, because this legacy policy synthesizes it directly.
+pub fn city_without_skill_selection025(o: &Observation) -> Option<Action> {
+    city_with_skill_selection(o, false)
+}
+fn city_with_skill_selection(o: &Observation, select_skills: bool) -> Option<Action> {
     if o.expedition_active {
         return None;
     }
@@ -251,7 +259,7 @@ pub fn city(o: &Observation) -> Option<Action> {
     }
     for h in o.heroes.iter().filter(|h| o.party.contains(&h.guid)) {
         let skills = selected(h);
-        if skills != h.selected {
+        if select_skills && skills != h.selected {
             return Some(Action::SelectSkills {
                 hero: h.guid,
                 skills,

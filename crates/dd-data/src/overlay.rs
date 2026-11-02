@@ -20,6 +20,7 @@ pub struct Layer {
 }
 #[derive(Debug, Clone)]
 pub struct Overlay {
+    pub(crate) cache024c: std::sync::Arc<crate::cache024c::Cache>,
     pub config: ContentConfig,
     pub is_new_game_plus: bool,
     pub layers: Vec<Layer>,
@@ -49,6 +50,11 @@ pub fn combat_path(path: &str) -> bool {
         || path == "shared/rules.json"
 }
 impl Overlay {
+    pub fn json(&self, relative: &str) -> Result<std::sync::Arc<Value>> {
+        self.cached(&format!("json:{relative}"), &[relative.into()], || {
+            serde_json::from_slice(&self.read(relative)?).map_err(|e| e.to_string())
+        })
+    }
     pub fn load(root: &Path, config: ContentConfig) -> Result<Self> {
         config.validate_root(root)?;
         let config = config.normalized()?;
@@ -87,7 +93,7 @@ impl Overlay {
         // The packaged fixture intentionally has no interface-only modes/base.
         if config.mode != "base" || mode_root.exists() {
             let settings: Value = serde_json::from_slice(
-                &std::fs::read(mode_root.join("mode_settings.json"))
+                &crate::telemetry024c::read(mode_root.join("mode_settings.json"))
                     .map_err(|e| format!("missing mode settings {}: {e}", mode_root.display()))?,
             )
             .map_err(|e| format!("mode settings: {e}"))?;
@@ -122,7 +128,7 @@ impl Overlay {
                 let settings_path = path.join("mode_settings.json");
                 let folder_override = if settings_path.is_file() {
                     let settings: Value = serde_json::from_slice(
-                        &std::fs::read(&settings_path).map_err(|e| e.to_string())?,
+                        &crate::telemetry024c::read(&settings_path).map_err(|e| e.to_string())?,
                     )
                     .map_err(|e| e.to_string())?;
                     if settings["mode_settings"]
@@ -147,6 +153,7 @@ impl Overlay {
             }
         }
         let mut overlay = Self {
+            cache024c: Default::default(),
             is_new_game_plus,
             config,
             layers,
@@ -192,9 +199,10 @@ impl Overlay {
         if mode.join("curios").is_dir() {
             let settings = mode.join("mode_settings.json");
             let folder_override = if settings.is_file() {
-                let raw: Value =
-                    serde_json::from_slice(&std::fs::read(&settings).map_err(|e| e.to_string())?)
-                        .map_err(|e| e.to_string())?;
+                let raw: Value = serde_json::from_slice(
+                    &crate::telemetry024c::read(&settings).map_err(|e| e.to_string())?,
+                )
+                .map_err(|e| e.to_string())?;
                 if raw["mode_settings"].get("replaces_default_mode").is_some() {
                     return Err("unsupported shared-scope mode replacement".into());
                 }
@@ -292,7 +300,8 @@ impl Overlay {
         if !crate::initial013::source_path(relative) || !self.sources(relative).contains(&layer) {
             return Err("source is outside enabled initial layers".into());
         }
-        std::fs::read(self.layers[layer].root.join(relative)).map_err(|e| e.to_string())
+        crate::telemetry024c::read(self.layers[layer].root.join(relative))
+            .map_err(|e| e.to_string())
     }
     pub fn read_initial(&self, relative: &str) -> Result<Vec<u8>> {
         let mut versions = self.read_initial_versions(relative)?;
@@ -318,7 +327,8 @@ impl Overlay {
         if !crate::maps014::source_path(relative) || !self.sources(relative).contains(&index) {
             return Err("outside enabled map source".into());
         }
-        std::fs::read(self.layers[index].root.join(relative)).map_err(|e| e.to_string())
+        crate::telemetry024c::read(self.layers[index].root.join(relative))
+            .map_err(|e| e.to_string())
     }
     pub fn read_opening_versions(&self, relative: &str) -> Result<Vec<Vec<u8>>> {
         if !crate::opening015::source_path(relative) {
@@ -368,6 +378,18 @@ impl Overlay {
         }
         Ok(versions.remove(0))
     }
+    /// Task 023 reads only the selected quirk behaviour tables. Old profiles
+    /// neither parse them nor change their source fingerprints.
+    pub fn read_quirk_actouts023(&self, relative: &str) -> Result<Vec<Vec<u8>>> {
+        if !crate::mechanisms023::enabled(&self.config, crate::mechanisms023::FIXES)
+            || !relative.starts_with("shared/quirk/")
+            || !relative.ends_with("quirk_act_outs.json")
+            || relative.contains("..")
+        {
+            return Err("outside task 023 quirk behaviour scope".into());
+        }
+        self.read_active_versions(relative)
+    }
     /// The 018 owner adds only this previously unconsumed roster setting.
     pub fn read_automation018(&self, relative: &str) -> Result<Vec<u8>> {
         if relative != "campaign/roster/roster.settings.json" {
@@ -391,14 +413,16 @@ impl Overlay {
         if !crate::campaign017::source_path(relative) || !self.sources(relative).contains(&layer) {
             return Err("outside selected campaign source".into());
         }
-        std::fs::read(self.layers[layer].root.join(relative)).map_err(|e| e.to_string())
+        crate::telemetry024c::read(self.layers[layer].root.join(relative))
+            .map_err(|e| e.to_string())
     }
     fn read_active_versions(&self, relative: &str) -> Result<Vec<Vec<u8>>> {
         let sources = self.sources(relative);
         let mut bytes = vec![];
         for index in sources {
             let path = self.layers[index].root.join(relative);
-            let next = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let next = crate::telemetry024c::read(&path)
+                .map_err(|e| format!("{}: {e}", path.display()))?;
             if !bytes.contains(&next) {
                 bytes.push(next);
             }
@@ -443,7 +467,8 @@ impl Overlay {
         let mut groups: Vec<(Vec<u8>, Vec<usize>)> = vec![];
         for index in sources {
             let path = self.layers[index].root.join(relative);
-            let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let bytes = crate::telemetry024c::read(&path)
+                .map_err(|e| format!("{}: {e}", path.display()))?;
             if let Some((_, members)) = groups.iter_mut().find(|(old, _)| *old == bytes) {
                 members.push(index);
             } else {
@@ -453,3 +478,4 @@ impl Overlay {
         Ok(groups.into_iter().map(|(_, sources)| sources).collect())
     }
 }
+

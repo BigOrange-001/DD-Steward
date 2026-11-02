@@ -20,8 +20,12 @@ use std::sync::{Arc, Mutex};
 mod districts;
 #[path = "quest_items017.rs"]
 mod quest_items;
+#[path = "recovery_projection025.rs"]
+mod recovery_projection025;
 #[path = "town_services016.rs"]
 mod services;
+#[path = "training_projection025.rs"]
+mod training_projection025;
 #[path = "town_week016.rs"]
 mod week;
 use week::CampaignSettlement;
@@ -273,14 +277,14 @@ impl Bonuses {
 #[serde(deny_unknown_fields)]
 struct State {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    campaign: Option<campaign::TownContext>,
+    campaign: Option<crate::shared024c::Shared<campaign::TownContext>>,
     profile: String,
     definition_id: String,
     estate_id: String,
-    heroes: Vec<Hero>,
+    heroes: crate::shared024c::Shared<Vec<Hero>>,
     party: Vec<u64>,
     wallet: BTreeMap<String, u32>,
-    assets: Vec<Asset>,
+    assets: crate::shared024c::Shared<Vec<Asset>>,
     next_asset: u64,
     next_guid: u64,
     purchases: BTreeSet<(Option<u64>, String, String)>,
@@ -291,7 +295,7 @@ struct State {
     highest_dungeon: u32,
     dungeon_xp: BTreeMap<String, u32>,
     rng: Rng,
-    recruits: Vec<Hero>,
+    recruits: crate::shared024c::Shared<Vec<Hero>>,
     wagon: Vec<String>,
     caretaker: BTreeMap<String, usize>,
     jobs: Vec<Job>,
@@ -479,10 +483,10 @@ impl Session {
                 profile: PROFILE.into(),
                 definition_id: String::new(),
                 estate_id,
-                heroes: vec![],
+                heroes: vec![].into(),
                 party: handoff.party,
                 wallet: handoff.wallet,
-                assets: vec![],
+                assets: vec![].into(),
                 next_asset: 1,
                 next_guid: handoff.next_guid,
                 purchases: BTreeSet::new(),
@@ -510,7 +514,7 @@ impl Session {
                     .unwrap_or(0),
                 dungeon_xp: BTreeMap::new(),
                 rng: Rng(seed),
-                recruits: vec![],
+                recruits: vec![].into(),
                 wagon: vec![],
                 caretaker: BTreeMap::new(),
                 jobs: vec![],
@@ -846,6 +850,7 @@ impl Session {
         Ok(b)
     }
     fn blueprint(&self, h: &Hero, quest: u32, entering: bool) -> Result<Blueprint> {
+        let _profile = dd_data::telemetry024c::scope("town_blueprint");
         let build = self.build_for(h)?;
         let ranks = h
             .selected
@@ -928,6 +933,7 @@ impl Session {
         Ok(b)
     }
     fn visible_hero(&self, h: &Hero) -> Result<VisibleHero> {
+        let _profile = dd_data::telemetry024c::scope("town_hero_stats");
         let stats = if h.state.alive {
             let k = PartyKernel::new(
                 vec![self.blueprint(h, 1, false)?],
@@ -1249,6 +1255,7 @@ impl Session {
         self.observe_with_choices(true)
     }
     pub(super) fn observe_with_choices(&self, include_choices: bool) -> Result<Observation> {
+        let _profile = dd_data::telemetry024c::scope("town_observe");
         let actions = if include_choices {
             self.choices()?
         } else {
@@ -1367,6 +1374,7 @@ impl Session {
         })
     }
 }
+
 
 #[path = "campaign017.rs"]
 pub mod campaign;

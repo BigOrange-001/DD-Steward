@@ -39,7 +39,7 @@ pub struct CombatLimits {
 impl CombatCandidates {
     /// This is a documented experiment preset, never a claim of parsed game rules.
     pub fn documented() -> Self {
-        serde_json::from_str(r###"{
+        serde_json::from_str(r#"{
   "id": "combat-candidates-012-v1",
   "status": "candidate; not calibrated against the original executable; not admitted for formal training",
   "healing": {
@@ -60,7 +60,8 @@ impl CombatCandidates {
     "protection_source": "https://darkestdungeon.wiki.gg/wiki/Combat_Mechanics_%28Darkest_Dungeon%29",
     "death_blow_source": "https://darkestdungeon.wiki.gg/wiki/Death%27s_Door_%28Darkest_Dungeon%29"
   }
-}"###)
+}
+"#)
             .expect("versioned host candidate document")
     }
     pub fn validate(&self) -> Result<()> {
@@ -113,3 +114,4 @@ impl CombatCandidates {
         Ok(format!("{}:{hash:016x}", self.id))
     }
 }
+

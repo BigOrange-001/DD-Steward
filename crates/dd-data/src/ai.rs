@@ -284,3 +284,4 @@ pub fn rank_values(value: &Value) -> Result<Vec<u8>> {
     }
     Ok(ranks)
 }
+

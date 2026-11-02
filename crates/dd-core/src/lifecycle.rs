@@ -824,8 +824,24 @@ impl Battle {
             }
             LifeOp::Kill => {
                 let alive = self.units[target].alive();
+                // Original Crow escape uses kill_self_queued. In the scoped
+                // retention contract this is a departure, not a player kill.
+                let escaped = actor == target
+                    && self.lifecycle.last_skill.as_deref() == Some("escape")
+                    && crate::execution025::shrieker_escape_source(self, target);
                 self.retire(target, events);
+                if alive && escaped {
+                    self.lifecycle
+                        .special
+                        .escaped
+                        .insert(target, self.units[target].source_id.clone());
+                    events.push(Event::Escaped {
+                        id: target,
+                        class: self.units[target].source_id.clone(),
+                    });
+                }
                 if alive
+                    && !escaped
                     && !self.units[target].blueprint.hero
                     && self.units[target]
                         .blueprint
@@ -842,7 +858,7 @@ impl Battle {
                         ),
                     );
                 }
-                if alive {
+                if alive && !escaped {
                     if self.units[target].blueprint.hero {
                         self.death_stress(target, events);
                         self.hero_death(target, events);
@@ -1039,6 +1055,11 @@ impl Battle {
             && !self.units.iter().any(|u| u.alive() && !u.blueprint.hero)
             && self.lifecycle.wave >= self.lifecycle.waves.len()
             && self.scenario.rules.farm.is_none()
+            && !(self.scenario.monsters.is_empty()
+                && dd_data::mechanisms023::enabled(
+                    &self.scenario.rules.content,
+                    dd_data::mechanisms023::FIXES,
+                ))
         {
             for id in 0..self.scenario.heroes.len() {
                 if self.units[id].alive() {
@@ -1052,6 +1073,11 @@ impl Battle {
             && !self.units.iter().any(|u| u.alive() && !u.blueprint.hero)
             && self.lifecycle.wave >= self.lifecycle.waves.len()
             && self.scenario.rules.farm.is_none()
+            && !(self.scenario.monsters.is_empty()
+                && dd_data::mechanisms023::enabled(
+                    &self.scenario.rules.content,
+                    dd_data::mechanisms023::FIXES,
+                ))
         {
             self.trinket_battle_end(events);
         }

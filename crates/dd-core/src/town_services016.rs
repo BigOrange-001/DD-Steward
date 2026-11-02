@@ -968,6 +968,7 @@ impl Session {
         Ok(quotes)
     }
     pub(super) fn choices(&self) -> Result<Vec<Choice>> {
+        let _profile = dd_data::telemetry024c::scope("town_choices");
         if self.state.departure.is_some() {
             return Ok(vec![]);
         }

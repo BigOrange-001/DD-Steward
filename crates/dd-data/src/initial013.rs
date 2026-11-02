@@ -375,3 +375,4 @@ impl InitialMap {
             .ok_or("unknown map position".into())
     }
 }
+

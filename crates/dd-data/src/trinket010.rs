@@ -95,7 +95,8 @@ impl TrinketState {
 }
 impl GameData {
     pub fn trinket_catalog(&self, roots: &[String]) -> Result<BTreeMap<String, Trinket>> {
-        let lib = library::json_library(
+        let _profile = crate::telemetry024c::scope("trinket_parse");
+        let lib = library::json_library_arc(
             &self.overlay,
             "trinkets/",
             ".entries.trinkets.json",
@@ -111,7 +112,7 @@ impl GameData {
             if seen.len() > 10000 {
                 return Err("trinket reference graph too large".into());
             }
-            let raw = library::unique_json(&lib, &id, "trinket")?;
+            let raw = library::unique_json(&lib.0, &id, "trinket")?;
             let o = raw.as_object().ok_or("invalid trinket definition")?;
             for key in o.keys() {
                 if !COMBAT_TRIGGERS
